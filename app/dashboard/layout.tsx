@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import {
-  LayoutDashboard, Tags, Package, ArrowRightLeft, MapPin, FileText, LogOut, Warehouse, Users, UserCircle, AlertTriangle
+  LayoutDashboard, Tags, Package, ArrowRightLeft, MapPin, FileText, LogOut, Warehouse, Users, UserCircle, AlertTriangle, History
 } from 'lucide-react'
 
 const menuItems = [
@@ -15,6 +15,7 @@ const menuItems = [
   { name: 'Transaksi', href: '/dashboard/transactions', icon: ArrowRightLeft },
   { name: 'Lokasi Rak', href: '/dashboard/locations', icon: MapPin },
   { name: 'Laporan', href: '/dashboard/reports', icon: FileText, badge: 'lowStock' },
+  { name: 'Histori Aktivitas', href: '/dashboard/history', icon: History },
   { name: 'Manajemen User', href: '/dashboard/users', icon: Users },
   { name: 'Profil Saya', href: '/dashboard/profile', icon: UserCircle },
 ]
@@ -24,37 +25,72 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router = useRouter()
   const [lowStockCount, setLowStockCount] = useState(0)
   const [userName, setUserName] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
 
+  // ============ AUTH GUARD ============
   useEffect(() => {
+    const checkAuth = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.replace('/login')
+        return
+      }
+      setIsAuthenticated(true)
+
+      const emailPrefix = user.email?.split('@')[0] || 'user'
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('id', user.id)
+        .maybeSingle()
+      setUserName(prof?.full_name || emailPrefix)
+      setLoading(false)
+    }
+
+    checkAuth()
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        router.replace('/login')
+      }
+    })
+
+    return () => authListener.subscription.unsubscribe()
+  }, [router])
+
+  // ============ LOW STOCK CHECK ============
+  useEffect(() => {
+    if (!isAuthenticated) return
     const checkLowStock = async () => {
       const { data } = await supabase
         .from('stocks')
         .select('current_stock, products ( min_stock )')
-
       if (data) {
         const low = data.filter((s: any) => s.current_stock <= (s.products?.min_stock || 10)).length
         setLowStockCount(low)
       }
     }
-
-    const fetchUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        const emailPrefix = user.email?.split('@')[0] || 'user'
-        const { data: prof } = await supabase.from('profiles').select('full_name').eq('id', user.id).maybeSingle()
-        setUserName(prof?.full_name || emailPrefix)
-      }
-    }
-
     checkLowStock()
-    fetchUser()
     const interval = setInterval(checkLowStock, 60000)
     return () => clearInterval(interval)
-  }, [pathname])
+  }, [pathname, isAuthenticated])
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
-    router.push('/login')
+    router.replace('/login')
+  }
+
+  // Loading screen sambil verifikasi
+  if (loading || !isAuthenticated) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-50">
+        <div className="text-center">
+          <div className="inline-block w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+          <p className="mt-4 text-slate-500 font-medium">Memverifikasi akses...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -115,11 +151,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </aside>
 
       <main className="flex-1 overflow-y-auto h-screen flex flex-col">
-        <div className="flex-1">
-          {children}
-        </div>
+        <div className="flex-1">{children}</div>
 
-        {/* FOOTER */}
         <footer className="py-6 px-10 text-center border-t border-slate-100 mt-auto">
           <p className="text-sm text-slate-400 font-medium">
             © 2026 <span className="text-slate-500 font-semibold">StockFlow</span>
