@@ -24,7 +24,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname()
   const router = useRouter()
   const [lowStockCount, setLowStockCount] = useState(0)
-  const [userName, setUserName] = useState('')
   const [loading, setLoading] = useState(true)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
 
@@ -38,13 +37,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       }
       setIsAuthenticated(true)
 
-      const emailPrefix = user.email?.split('@')[0] || 'user'
-      const { data: prof } = await supabase
-        .from('profiles')
-        .select('full_name')
-        .eq('id', user.id)
-        .maybeSingle()
-      setUserName(prof?.full_name || emailPrefix)
       setLoading(false)
     }
 
@@ -158,7 +150,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             © 2026 <span className="text-slate-500 font-semibold">StockFlow</span>
           </p>
           <p className="text-xs text-slate-400 mt-1.5">
-            Rekap ini dibuat oleh <span className="text-emerald-600 font-semibold">@{userName || 'user'}</span>
+            Rekap ini dibuat oleh <span className="text-emerald-600 font-semibold">@tyowhydi</span>
           </p>
         </footer>
       </main>
