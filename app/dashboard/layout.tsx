@@ -5,13 +5,14 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import {
-  LayoutDashboard, Tags, Package, ArrowRightLeft, MapPin, FileText, LogOut, Warehouse, Users, UserCircle, AlertTriangle, History
+  LayoutDashboard, Tags, Package, ArrowRightLeft, MapPin, FileText, LogOut, Warehouse, Users, UserCircle, AlertTriangle, History, Boxes
 } from 'lucide-react'
 
 const menuItems = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Kategori', href: '/dashboard/categories', icon: Tags },
   { name: 'Produk', href: '/dashboard/products', icon: Package },
+  { name: 'Stok Gudang', href: '/dashboard/stock', icon: Boxes },
   { name: 'Transaksi', href: '/dashboard/transactions', icon: ArrowRightLeft },
   { name: 'Lokasi Rak', href: '/dashboard/locations', icon: MapPin },
   { name: 'Laporan', href: '/dashboard/reports', icon: FileText, badge: 'lowStock' },
@@ -36,7 +37,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         return
       }
       setIsAuthenticated(true)
-
       setLoading(false)
     }
 
