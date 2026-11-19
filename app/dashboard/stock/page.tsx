@@ -13,7 +13,22 @@ type StockRow = {
   locations: { code: string }
 }
 
+type CategoryRecord = { name: string }
+type ProductRecord = {
+  sku: string
+  min_stock: number
+  categories: CategoryRecord | CategoryRecord[] | null
+}
+type StockRecord = Omit<StockRow, 'products' | 'locations'> & {
+  products: ProductRecord | ProductRecord[] | null
+  locations: { code: string } | { code: string }[] | null
+}
+
 type ViewMode = 'per-rak' | 'per-sku'
+
+function firstRelated<T>(relationship: T | T[] | null | undefined): T | undefined {
+  return Array.isArray(relationship) ? relationship[0] : relationship ?? undefined
+}
 
 export default function StockPage() {
   const [stocks, setStocks] = useState<StockRow[]>([])
@@ -33,12 +48,31 @@ export default function StockPage() {
       `)
       .order('current_stock', { ascending: false })
 
-    if (error) console.error('Error:', error.message)
-    if (data) setStocks(data as any)
+    if (error) {
+      console.error('Gagal memuat stok:', error.message)
+      setFetching(false)
+      return
+    }
+    if (data) {
+      const rows = data as StockRecord[]
+      setStocks(rows.map((row) => {
+        const product = firstRelated(row.products)
+        const category = firstRelated(product?.categories)
+        const location = firstRelated(row.locations)
+        return {
+          ...row,
+          products: product ? { ...product, categories: category ?? null } : null,
+          locations: location ?? null,
+        } as StockRow
+      }))
+    }
     setFetching(false)
   }
 
-  useEffect(() => { fetchStocks() }, [])
+  useEffect(() => {
+    const request = window.setTimeout(() => void fetchStocks(), 0)
+    return () => window.clearTimeout(request)
+  }, [])
 
   // Stats
   const stats = useMemo(() => {
@@ -149,7 +183,12 @@ export default function StockPage() {
           <div className="md:col-span-3">
             <select
               value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value as any)}
+              onChange={(e) => {
+                const status = e.target.value
+                if (status === 'ALL' || status === 'AMAN' || status === 'MENIPIS' || status === 'KOSONG') {
+                  setFilterStatus(status)
+                }
+              }}
               className="w-full px-4 py-3 border border-slate-200 rounded-xl text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none transition font-medium"
             >
               <option value="ALL">Semua Status</option>

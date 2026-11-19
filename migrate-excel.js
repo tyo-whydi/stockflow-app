@@ -2,6 +2,8 @@
 // MIGRATE EXCEL → SUPABASE
 // ==========================================
 
+// Keep this script in CommonJS mode so it runs with the existing Node.js setup.
+/* eslint-disable @typescript-eslint/no-require-imports */
 const XLSX = require('xlsx')
 const fs = require('fs')
 const path = require('path')

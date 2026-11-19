@@ -17,6 +17,11 @@ type Product = {
   locations_count: number
 }
 
+type ProductRecord = Omit<Product, 'total_stock' | 'locations_count'> & {
+  categories: { name: string } | { name: string }[] | null
+}
+type StockRecord = { product_id: number; current_stock: number }
+
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<Category[]>([])
@@ -49,18 +54,24 @@ export default function ProductsPage() {
       .select('product_id, location_id, current_stock')
 
     // Gabungkan: hitung total_stock & locations_count per produk
-    const merged = (prodData || []).map((p: any) => {
-      const productStocks = (stocksData || []).filter((s: any) => s.product_id === p.id)
-      const totalStock = productStocks.reduce((sum: number, s: any) => sum + s.current_stock, 0)
-      const locationsCount = productStocks.filter((s: any) => s.current_stock > 0).length
-      return { ...p, total_stock: totalStock, locations_count: locationsCount }
+    const productRows = (prodData ?? []) as ProductRecord[]
+    const stockRows = (stocksData ?? []) as StockRecord[]
+    const merged: Product[] = productRows.map((product) => {
+      const productStocks = stockRows.filter((stock) => stock.product_id === product.id)
+      const totalStock = productStocks.reduce((sum, stock) => sum + stock.current_stock, 0)
+      const locationsCount = productStocks.filter((stock) => stock.current_stock > 0).length
+      const category = Array.isArray(product.categories) ? product.categories[0] ?? null : product.categories
+      return { ...product, categories: category, total_stock: totalStock, locations_count: locationsCount }
     })
 
-    setProducts(merged as any)
+    setProducts(merged)
     setFetching(false)
   }
 
-  useEffect(() => { fetchData() }, [])
+  useEffect(() => {
+    const request = window.setTimeout(() => void fetchData(), 0)
+    return () => window.clearTimeout(request)
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

@@ -23,7 +23,10 @@ export default function LocationsPage() {
     setFetching(false)
   }
 
-  useEffect(() => { fetchLocations() }, [])
+  useEffect(() => {
+    const request = window.setTimeout(() => void fetchLocations(), 0)
+    return () => window.clearTimeout(request)
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

@@ -23,7 +23,10 @@ export default function CategoriesPage() {
     setFetching(false)
   }
 
-  useEffect(() => { fetchCategories() }, [])
+  useEffect(() => {
+    const request = window.setTimeout(() => void fetchCategories(), 0)
+    return () => window.clearTimeout(request)
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

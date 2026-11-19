@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import {
-  LayoutDashboard, Tags, Package, ArrowRightLeft, MapPin, FileText, LogOut, Warehouse, Users, UserCircle, AlertTriangle, History, Boxes
+  LayoutDashboard, Tags, Package, ArrowRightLeft, MapPin, FileText, LogOut, Warehouse, Users, UserCircle, AlertTriangle, History, Boxes, Menu, X
 } from 'lucide-react'
 
 const menuItems = [
@@ -27,6 +27,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [lowStockCount, setLowStockCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
   // ============ AUTH GUARD ============
   useEffect(() => {
@@ -55,11 +56,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => {
     if (!isAuthenticated) return
     const checkLowStock = async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('stocks')
         .select('current_stock, products ( min_stock )')
+      if (error) {
+        console.error('Gagal memeriksa stok menipis:', error.message)
+        return
+      }
       if (data) {
-        const low = data.filter((s: any) => s.current_stock <= (s.products?.min_stock || 10)).length
+        const low = data.filter((stock) => {
+          const product = Array.isArray(stock.products) ? stock.products[0] : stock.products
+          return stock.current_stock <= (product?.min_stock ?? 10)
+        }).length
         setLowStockCount(low)
       }
     }
@@ -85,73 +93,115 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     )
   }
 
+  const navigation = (
+    <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-5">
+      <p className="mb-3 px-3 pt-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
+        Menu utama
+      </p>
+      {menuItems.map((item) => {
+        const Icon = item.icon
+        const isActive = pathname === item.href
+        const showBadge = item.badge === 'lowStock' && lowStockCount > 0
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            onClick={() => setIsMobileMenuOpen(false)}
+            aria-current={isActive ? 'page' : undefined}
+            className={
+              isActive
+                ? 'flex items-center gap-3 rounded-xl bg-emerald-700 px-3.5 py-3 text-white shadow-md shadow-emerald-900/10 transition'
+                : 'flex items-center gap-3 rounded-xl px-3.5 py-3 font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950'
+            }
+          >
+            <Icon size={19} strokeWidth={isActive ? 2.4 : 1.9} />
+            <span className="flex-1 text-[13px] font-semibold">{item.name}</span>
+            {showBadge && (
+              <span className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                isActive ? 'bg-white text-amber-700' : 'bg-amber-50 text-amber-800'
+              }`}>
+                <AlertTriangle size={10} />
+                {lowStockCount}
+              </span>
+            )}
+          </Link>
+        )
+      })}
+    </nav>
+  )
+
   return (
-    <div className="flex h-screen w-full bg-slate-50">
-      <aside className="w-72 shrink-0 bg-white border-r border-slate-200 flex flex-col h-screen shadow-sm">
-        <div className="p-7 border-b border-slate-100">
+    <div className="min-h-screen w-full bg-slate-50 lg:flex">
+      {isMobileMenuOpen && (
+        <button
+          type="button"
+          className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-[2px] lg:hidden"
+          aria-label="Tutup menu navigasi"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+
+      <aside className={`fixed inset-y-0 left-0 z-50 flex h-screen w-[min(18rem,calc(100vw-2.5rem))] shrink-0 flex-col border-r border-slate-200 bg-white shadow-xl transition-transform duration-200 lg:sticky lg:top-0 lg:z-20 lg:w-64 lg:translate-x-0 lg:shadow-sm ${
+        isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
+      }`}>
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-5">
           <div className="flex items-center gap-3">
-            <div className="bg-gradient-to-br from-emerald-500 to-emerald-700 p-2.5 rounded-xl shadow-lg shadow-emerald-500/20">
-              <Warehouse className="text-white" size={26} />
+            <div className="rounded-xl bg-emerald-700 p-2.5 shadow-lg shadow-emerald-900/15">
+              <Warehouse className="text-white" size={23} />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900 tracking-tight">StockFlow</h1>
-              <p className="text-xs text-slate-400 font-medium">Warehouse System</p>
+              <h1 className="text-lg font-bold tracking-tight text-slate-900">StockFlow</h1>
+              <p className="text-[11px] font-medium text-slate-400">Warehouse system</p>
             </div>
           </div>
+          <button
+            type="button"
+            onClick={() => setIsMobileMenuOpen(false)}
+            className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 lg:hidden"
+            aria-label="Tutup menu"
+          >
+            <X size={19} />
+          </button>
         </div>
 
-        <nav className="flex-1 p-5 space-y-1.5 overflow-y-auto">
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-4 mb-3 mt-2">Menu Utama</p>
-          {menuItems.map((item) => {
-            const Icon = item.icon
-            const isActive = pathname === item.href
-            const showBadge = item.badge === 'lowStock' && lowStockCount > 0
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={
-                  isActive
-                    ? 'flex items-center gap-3.5 px-4 py-3.5 rounded-xl transition-all bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-semibold shadow-lg shadow-emerald-500/25'
-                    : 'flex items-center gap-3.5 px-4 py-3.5 rounded-xl transition-all text-slate-600 hover:bg-slate-100 hover:text-slate-900 font-medium'
-                }
-              >
-                <Icon size={20} strokeWidth={isActive ? 2.5 : 2} />
-                <span className="text-[15px] flex-1">{item.name}</span>
-                {showBadge && (
-                  <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                    isActive ? 'bg-white text-red-600' : 'bg-red-100 text-red-600'
-                  }`}>
-                    <AlertTriangle size={10} />
-                    {lowStockCount}
-                  </span>
-                )}
-              </Link>
-            )
-          })}
-        </nav>
+        {navigation}
 
-        <div className="p-5 border-t border-slate-100">
+        <div className="border-t border-slate-100 p-3">
           <button
             onClick={handleLogout}
-            className="flex items-center gap-3 px-4 py-3.5 w-full text-red-600 hover:bg-red-50 rounded-xl transition-colors font-medium"
+            className="flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-red-600 transition-colors hover:bg-red-50"
           >
-            <LogOut size={20} />
-            <span className="text-[15px]">Keluar</span>
+            <LogOut size={19} />
+            <span className="text-[13px] font-semibold">Keluar</span>
           </button>
         </div>
       </aside>
 
-      <main className="flex-1 overflow-y-auto h-screen flex flex-col">
+      <main className="flex min-h-screen min-w-0 flex-1 flex-col">
+        <div className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-slate-200/80 bg-white/95 px-4 backdrop-blur sm:px-6 lg:hidden">
+          <button
+            type="button"
+            onClick={() => setIsMobileMenuOpen(true)}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-slate-700 transition hover:bg-slate-100"
+            aria-label="Buka menu navigasi"
+            aria-expanded={isMobileMenuOpen}
+          >
+            <Menu size={21} />
+          </button>
+          <div className="flex items-center gap-2">
+            <Warehouse size={18} className="text-emerald-700" />
+            <span className="text-sm font-bold text-slate-900">StockFlow</span>
+          </div>
+          <span className="h-10 w-10" aria-hidden="true" />
+        </div>
+
         <div className="flex-1">{children}</div>
 
-        <footer className="py-6 px-10 text-center border-t border-slate-100 mt-auto">
-          <p className="text-sm text-slate-400 font-medium">
-            © 2026 <span className="text-slate-500 font-semibold">StockFlow</span>
+        <footer className="mt-auto flex flex-col gap-1 border-t border-slate-200/70 px-4 py-5 text-center sm:flex-row sm:items-center sm:justify-between sm:px-8">
+          <p className="text-xs font-medium text-slate-400">
+            © {new Date().getFullYear()} <span className="font-semibold text-slate-500">StockFlow</span>
           </p>
-          <p className="text-xs text-slate-400 mt-1.5">
-            Rekap ini dibuat oleh <span className="text-emerald-600 font-semibold">@tyowhydi</span>
-          </p>
+          <p className="text-xs text-slate-400">Warehouse management system</p>
         </footer>
       </main>
     </div>

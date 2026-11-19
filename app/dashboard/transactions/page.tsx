@@ -19,6 +19,17 @@ type Transaction = {
   profiles: { full_name: string, email: string } | null
 }
 
+type TransactionRecord = Omit<Transaction, 'products' | 'locations' | 'profiles'> & {
+  products: { sku: string } | { sku: string }[] | null
+  locations: { code: string } | { code: string }[] | null
+}
+type TransactionUser = { id: number; user_id: string | null }
+type TransactionProfile = { id: string; full_name: string; email: string }
+
+function firstRelated<T>(relationship: T | T[] | null | undefined): T | undefined {
+  return Array.isArray(relationship) ? relationship[0] : relationship ?? undefined
+}
+
 const TABLE_HEADERS = ['Tanggal', 'Tipe', 'SKU', 'Rak', 'Qty', 'Petugas', 'Catatan', 'Aksi']
 
 export default function TransactionsPage() {
@@ -66,29 +77,49 @@ export default function TransactionsPage() {
     }
 
     // Ambil user_id via query terpisah
-    const trxIds = (trxData || []).map((t: any) => t.id)
-    const { data: userIds } = trxIds.length > 0
-      ? await supabase.from('transactions').select('id, user_id').in('id', trxIds)
-      : { data: [] as any[] }
+    const transactionRows = (trxData ?? []) as TransactionRecord[]
+    const trxIds = transactionRows.map((transaction) => transaction.id)
+    let userRows: TransactionUser[] = []
+    if (trxIds.length > 0) {
+      const { data: userData, error: userError } = await supabase
+        .from('transactions')
+        .select('id, user_id')
+        .in('id', trxIds)
+      if (userError) {
+        console.error('Error fetching transaction users:', userError.message)
+      } else {
+        userRows = (userData ?? []) as TransactionUser[]
+      }
+    }
 
     // Ambil profiles
-    const { data: profilesData } = await supabase.from('profiles').select('id, full_name, email')
+    const { data: profilesData, error: profilesError } = await supabase
+      .from('profiles')
+      .select('id, full_name, email')
+    if (profilesError) console.error('Error fetching profiles:', profilesError.message)
+    const profileRows = (profilesData ?? []) as TransactionProfile[]
 
     // Gabungkan data
-    const merged = (trxData || []).map((trx: any) => {
-      const userRec = userIds?.find((u: any) => u.id === trx.id)
-      const profile = profilesData?.find((p: any) => p.id === userRec?.user_id)
+    const merged: Transaction[] = transactionRows.map((trx) => {
+      const userRec = userRows.find((user) => user.id === trx.id)
+      const profile = profileRows.find((item) => item.id === userRec?.user_id)
       return {
         ...trx,
-        profiles: profile ? { full_name: profile.full_name, email: profile.email } : null
+        products: firstRelated(trx.products) ?? { sku: '' },
+        locations: firstRelated(trx.locations) ?? { code: '' },
+        notes: trx.notes ?? '',
+        profiles: profile ? { full_name: profile.full_name, email: profile.email } : null,
       }
     })
 
-    setTransactions(merged as any)
+    setTransactions(merged)
     setFetching(false)
   }
 
-  useEffect(() => { fetchData() }, [])
+  useEffect(() => {
+    const request = window.setTimeout(() => void fetchData(), 0)
+    return () => window.clearTimeout(request)
+  }, [])
 
   // Simpan transaksi baru
   const handleSubmit = async (e: React.FormEvent) => {

@@ -28,7 +28,10 @@ export default function UsersPage() {
     setFetching(false)
   }
 
-  useEffect(() => { fetchUsers() }, [])
+  useEffect(() => {
+    const request = window.setTimeout(() => void fetchUsers(), 0)
+    return () => window.clearTimeout(request)
+  }, [])
 
   const handleRoleChange = async (userId: string, newRole: string) => {
     const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', userId)

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { useCallback, useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
 import { History, Search, X, Plus, Pencil, Trash2, User, Clock, Filter } from 'lucide-react'
 
@@ -14,7 +14,9 @@ type AuditLog = {
   created_at: string
 }
 
-type Profile = { id: string, full_name: string, email: string }
+type Profile = { id: string, full_name: string | null, email: string }
+type AuditAction = 'ALL' | 'INSERT' | 'UPDATE' | 'DELETE'
+type AuditTable = 'ALL' | 'categories' | 'locations' | 'products' | 'transactions' | 'profiles'
 
 const TABLE_LABELS: Record<string, string> = {
   categories: 'Kategori',
@@ -29,8 +31,8 @@ export default function HistoryPage() {
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [fetching, setFetching] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
-  const [filterAction, setFilterAction] = useState<'ALL' | 'INSERT' | 'UPDATE' | 'DELETE'>('ALL')
-  const [filterTable, setFilterTable] = useState('ALL')
+  const [filterAction, setFilterAction] = useState<AuditAction>('ALL')
+  const [filterTable, setFilterTable] = useState<AuditTable>('ALL')
 
   const fetchData = async () => {
     setFetching(true)
@@ -40,17 +42,20 @@ export default function HistoryPage() {
       .order('created_at', { ascending: false })
       .limit(500)
     const { data: profilesData } = await supabase.from('profiles').select('id, full_name, email')
-    if (logsData) setLogs(logsData as any)
+    if (logsData) setLogs(logsData as AuditLog[])
     if (profilesData) setProfiles(profilesData)
     setFetching(false)
   }
 
-  useEffect(() => { fetchData() }, [])
+  useEffect(() => {
+    const request = window.setTimeout(() => void fetchData(), 0)
+    return () => window.clearTimeout(request)
+  }, [])
 
-  const getUserName = (userId: string) => {
+  const getUserName = useCallback((userId: string) => {
     const profile = profiles.find(p => p.id === userId)
     return profile?.full_name || profile?.email?.split('@')[0] || 'System'
-  }
+  }, [profiles])
 
   const filteredLogs = useMemo(() => {
     return logs.filter(log => {
@@ -62,7 +67,7 @@ export default function HistoryPage() {
       const matchTable = filterTable === 'ALL' || log.table_name === filterTable
       return matchSearch && matchAction && matchTable
     })
-  }, [logs, profiles, searchQuery, filterAction, filterTable])
+  }, [logs, getUserName, searchQuery, filterAction, filterTable])
 
   const actionBadge = (action: string) => {
     if (action === 'INSERT') return { label: 'Tambah', color: 'bg-emerald-100 text-emerald-700', icon: Plus }
@@ -117,7 +122,12 @@ export default function HistoryPage() {
           <div className="md:col-span-3">
             <select
               value={filterAction}
-              onChange={(e) => setFilterAction(e.target.value as any)}
+              onChange={(e) => {
+                const action = e.target.value
+                if (action === 'ALL' || action === 'INSERT' || action === 'UPDATE' || action === 'DELETE') {
+                  setFilterAction(action)
+                }
+              }}
               className="w-full px-4 py-3 border border-slate-200 rounded-xl text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none transition font-medium"
             >
               <option value="ALL">Semua Aksi</option>
@@ -129,7 +139,13 @@ export default function HistoryPage() {
           <div className="md:col-span-3">
             <select
               value={filterTable}
-              onChange={(e) => setFilterTable(e.target.value)}
+              onChange={(e) => {
+                const table = e.target.value
+                if (table === 'ALL' || table === 'categories' || table === 'locations' ||
+                  table === 'products' || table === 'transactions' || table === 'profiles') {
+                  setFilterTable(table)
+                }
+              }}
               className="w-full px-4 py-3 border border-slate-200 rounded-xl text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500 outline-none transition font-medium"
             >
               <option value="ALL">Semua Tabel</option>

@@ -7,8 +7,12 @@ import { FileText, Download, Printer, Search, X } from 'lucide-react'
 type StockReport = {
   id: number
   current_stock: number
-  products: { sku: string, min_stock: number }
-  locations: { code: string }
+  products: { sku: string, min_stock: number } | { sku: string, min_stock: number }[] | null
+  locations: { code: string } | { code: string }[] | null
+}
+
+function firstRelated<T>(relationship: T | T[] | null | undefined): T | undefined {
+  return Array.isArray(relationship) ? relationship[0] : relationship ?? undefined
 }
 
 export default function ReportsPage() {
@@ -23,18 +27,21 @@ export default function ReportsPage() {
       .from('stocks')
       .select('id, current_stock, products ( sku, min_stock ), locations ( code )')
       .order('current_stock', { ascending: true })
-    if (data) setStocks(data as any)
+    if (data) setStocks(data as StockReport[])
     setFetching(false)
   }
 
-  useEffect(() => { fetchStocks() }, [])
+  useEffect(() => {
+    const request = window.setTimeout(() => void fetchStocks(), 0)
+    return () => window.clearTimeout(request)
+  }, [])
 
   const filteredStocks = useMemo(() => {
     return stocks.filter(s => {
       const matchSearch = searchQuery === '' ||
-        s.products?.sku?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        s.locations?.code?.toLowerCase().includes(searchQuery.toLowerCase())
-      const isLow = s.current_stock <= (s.products?.min_stock || 10)
+        firstRelated(s.products)?.sku?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        firstRelated(s.locations)?.code?.toLowerCase().includes(searchQuery.toLowerCase())
+      const isLow = s.current_stock <= (firstRelated(s.products)?.min_stock || 10)
       const matchLow = !showLowStockOnly || isLow
       return matchSearch && matchLow
     })
@@ -44,8 +51,10 @@ export default function ReportsPage() {
     if (filteredStocks.length === 0) return alert('Belum ada data untuk di-export')
     const headers = ['SKU', 'Lokasi Rak', 'Stok Saat Ini', 'Min Stok', 'Status']
     const rows = filteredStocks.map(s => {
-      const isLow = s.current_stock <= (s.products?.min_stock || 10)
-      return [s.products?.sku, s.locations?.code, s.current_stock, s.products?.min_stock, isLow ? 'Stok Menipis' : 'Aman']
+      const product = firstRelated(s.products)
+      const location = firstRelated(s.locations)
+      const isLow = s.current_stock <= (product?.min_stock || 10)
+      return [product?.sku, location?.code, s.current_stock, product?.min_stock, isLow ? 'Stok Menipis' : 'Aman']
     })
     const csvContent = [headers, ...rows].map(e => e.join(',')).join('\n')
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
@@ -62,7 +71,9 @@ export default function ReportsPage() {
     window.print()
   }
 
-  const lowStockCount = stocks.filter(s => s.current_stock <= (s.products?.min_stock || 10)).length
+  const lowStockCount = stocks.filter(
+    s => s.current_stock <= (firstRelated(s.products)?.min_stock || 10),
+  ).length
 
   return (
     <div className="p-10 max-w-[1600px] mx-auto">
@@ -161,11 +172,13 @@ export default function ReportsPage() {
               </td></tr>
             ) : (
               filteredStocks.map((stock) => {
-                const isLow = stock.current_stock <= (stock.products?.min_stock || 10)
+                const product = firstRelated(stock.products)
+                const location = firstRelated(stock.locations)
+                const isLow = stock.current_stock <= (product?.min_stock || 10)
                 return (
                   <tr key={stock.id} className="border-b border-slate-50 hover:bg-slate-50 transition">
-                    <td className="px-8 py-5 font-semibold text-slate-800">{stock.products?.sku}</td>
-                    <td className="px-8 py-5 text-slate-600">{stock.locations?.code}</td>
+                    <td className="px-8 py-5 font-semibold text-slate-800">{product?.sku}</td>
+                    <td className="px-8 py-5 text-slate-600">{location?.code}</td>
                     <td className={`px-8 py-5 font-bold ${isLow ? 'text-red-600' : 'text-emerald-600'}`}>
                       {stock.current_stock}
                     </td>
