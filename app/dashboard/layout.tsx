@@ -195,7 +195,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <span className="h-10 w-10" aria-hidden="true" />
         </div>
 
-        <div className="flex-1">{children}</div>
+        <div className="dashboard-content flex-1">{children}</div>
 
         <footer className="mt-auto flex flex-col gap-1 border-t border-slate-200/70 px-4 py-5 text-center sm:flex-row sm:items-center sm:justify-between sm:px-8">
           <p className="text-xs font-medium text-slate-400">
