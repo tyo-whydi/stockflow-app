@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
-import { FileText, Download, Printer, Search, X } from 'lucide-react'
+import { FileText, Download, Printer, Search, X, RefreshCw } from 'lucide-react'
+import * as XLSX from 'xlsx'
 
 type StockReport = {
   id: number
@@ -20,14 +21,21 @@ export default function ReportsPage() {
   const [fetching, setFetching] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [showLowStockOnly, setShowLowStockOnly] = useState(false)
+  const [errorMessage, setErrorMessage] = useState('')
 
   const fetchStocks = async () => {
     setFetching(true)
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('stocks')
       .select('id, current_stock, products ( sku, min_stock ), locations ( code )')
       .order('current_stock', { ascending: true })
-    if (data) setStocks(data as StockReport[])
+    if (error) {
+      console.error('Gagal memuat laporan stok:', error.message)
+      setErrorMessage('Laporan belum dapat dimuat. Periksa koneksi lalu coba lagi.')
+    } else {
+      if (data) setStocks(data as StockReport[])
+      setErrorMessage('')
+    }
     setFetching(false)
   }
 
@@ -41,30 +49,34 @@ export default function ReportsPage() {
       const matchSearch = searchQuery === '' ||
         firstRelated(s.products)?.sku?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         firstRelated(s.locations)?.code?.toLowerCase().includes(searchQuery.toLowerCase())
-      const isLow = s.current_stock <= (firstRelated(s.products)?.min_stock || 10)
+      const isLow = s.current_stock <= (firstRelated(s.products)?.min_stock ?? 10)
       const matchLow = !showLowStockOnly || isLow
       return matchSearch && matchLow
     })
   }, [stocks, searchQuery, showLowStockOnly])
 
-  const handleExportCSV = () => {
+  const handleExportExcel = () => {
     if (filteredStocks.length === 0) return alert('Belum ada data untuk di-export')
-    const headers = ['SKU', 'Lokasi Rak', 'Stok Saat Ini', 'Min Stok', 'Status']
-    const rows = filteredStocks.map(s => {
+    const rows: (string | number)[][] = [
+      ['SKU', 'Lokasi Rak', 'Stok Saat Ini', 'Min Stok', 'Status'],
+    ]
+    filteredStocks.forEach((s) => {
       const product = firstRelated(s.products)
       const location = firstRelated(s.locations)
-      const isLow = s.current_stock <= (product?.min_stock || 10)
-      return [product?.sku, location?.code, s.current_stock, product?.min_stock, isLow ? 'Stok Menipis' : 'Aman']
+      const isLow = s.current_stock <= (product?.min_stock ?? 10)
+      rows.push([
+        product?.sku ?? '-',
+        location?.code ?? '-',
+        s.current_stock,
+        product?.min_stock ?? 10,
+        isLow ? 'Stok Menipis' : 'Aman',
+      ])
     })
-    const csvContent = [headers, ...rows].map(e => e.join(',')).join('\n')
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    link.setAttribute('href', URL.createObjectURL(blob))
-    link.setAttribute('download', `Laporan_Stok_${new Date().toISOString().split('T')[0]}.csv`)
-    link.style.visibility = 'hidden'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+    const worksheet = XLSX.utils.aoa_to_sheet(rows)
+    worksheet['!cols'] = [{ wch: 30 }, { wch: 18 }, { wch: 18 }, { wch: 14 }, { wch: 18 }]
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Stok Gudang')
+    XLSX.writeFile(workbook, `Laporan_Stok_${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
 
   const handlePrint = () => {
@@ -72,7 +84,7 @@ export default function ReportsPage() {
   }
 
   const lowStockCount = stocks.filter(
-    s => s.current_stock <= (firstRelated(s.products)?.min_stock || 10),
+    s => s.current_stock <= (firstRelated(s.products)?.min_stock ?? 10),
   ).length
 
   return (
@@ -93,13 +105,22 @@ export default function ReportsPage() {
             <Printer size={18} />
             Print
           </button>
-          <button onClick={handleExportCSV}
+          <button onClick={handleExportExcel} disabled={filteredStocks.length === 0 || fetching}
             className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white font-semibold px-5 py-3 rounded-xl transition-all shadow-lg shadow-emerald-500/25">
             <Download size={18} />
             Export Excel
           </button>
         </div>
       </div>
+
+      {errorMessage && (
+        <div role="alert" className="mb-5 flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <span>{errorMessage}</span>
+          <button type="button" onClick={() => void fetchStocks()} className="inline-flex shrink-0 items-center gap-1 font-semibold">
+            <RefreshCw size={14} /> Coba lagi
+          </button>
+        </div>
+      )}
 
       {/* Print Header - Only Shows When Printing */}
       <div className="hidden print:block mb-8">
@@ -174,7 +195,7 @@ export default function ReportsPage() {
               filteredStocks.map((stock) => {
                 const product = firstRelated(stock.products)
                 const location = firstRelated(stock.locations)
-                const isLow = stock.current_stock <= (product?.min_stock || 10)
+                const isLow = stock.current_stock <= (product?.min_stock ?? 10)
                 return (
                   <tr key={stock.id} className="border-b border-slate-50 hover:bg-slate-50 transition">
                     <td className="px-8 py-5 font-semibold text-slate-800">{product?.sku}</td>

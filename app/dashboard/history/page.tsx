@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
-import { History, Search, X, Plus, Pencil, Trash2, User, Clock, Filter } from 'lucide-react'
+import { History, Search, X, Plus, Pencil, Trash2, User, Clock, Filter, Download, RefreshCw } from 'lucide-react'
 
 type AuditLog = {
   id: number
@@ -33,18 +33,27 @@ export default function HistoryPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [filterAction, setFilterAction] = useState<AuditAction>('ALL')
   const [filterTable, setFilterTable] = useState<AuditTable>('ALL')
+  const [errorMessage, setErrorMessage] = useState('')
 
   const fetchData = async () => {
     setFetching(true)
-    const { data: logsData } = await supabase
-      .from('audit_logs')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(500)
-    const { data: profilesData } = await supabase.from('profiles').select('id, full_name, email')
-    if (logsData) setLogs(logsData as AuditLog[])
-    if (profilesData) setProfiles(profilesData)
-    setFetching(false)
+    try {
+      const [logsResult, profilesResult] = await Promise.all([
+        supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(500),
+        supabase.from('profiles').select('id, full_name, email'),
+      ])
+      if (logsResult.error || profilesResult.error) {
+        const error = logsResult.error ?? profilesResult.error
+        console.error('Gagal memuat histori aktivitas:', error?.message)
+        setErrorMessage('Histori belum dapat dimuat. Periksa koneksi lalu coba lagi.')
+        return
+      }
+      if (logsResult.data) setLogs(logsResult.data as AuditLog[])
+      if (profilesResult.data) setProfiles(profilesResult.data)
+      setErrorMessage('')
+    } finally {
+      setFetching(false)
+    }
   }
 
   useEffect(() => {
@@ -83,6 +92,29 @@ export default function HistoryPage() {
     }
   }
 
+  const exportHistory = () => {
+    if (filteredLogs.length === 0) return
+    const escapeCsv = (value: string) => `"${value.replace(/"/g, '""')}"`
+    const rows = filteredLogs.map((log) => [
+      log.created_at,
+      log.action,
+      TABLE_LABELS[log.table_name] || log.table_name,
+      getUserName(log.user_id),
+      log.description ?? '',
+      log.record_id,
+    ])
+    const csv = [
+      ['Waktu', 'Aksi', 'Bagian', 'Pengguna', 'Deskripsi', 'ID Data'],
+      ...rows,
+    ].map((row) => row.map(escapeCsv).join(',')).join('\r\n')
+    const url = URL.createObjectURL(new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8;' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `Histori_Aktivitas_${new Date().toISOString().slice(0, 10)}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="p-10 max-w-[1600px] mx-auto">
       <div className="flex items-center gap-3 mb-8">
@@ -93,6 +125,28 @@ export default function HistoryPage() {
           <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Histori Aktivitas</h1>
           <p className="text-slate-500">Catatan lengkap semua aktivitas di sistem.</p>
         </div>
+      </div>
+
+      {errorMessage && (
+        <div role="alert" className="mb-5 flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <span>{errorMessage}</span>
+          <button type="button" onClick={() => void fetchData()} className="inline-flex shrink-0 items-center gap-1 font-semibold">
+            <RefreshCw size={14} /> Coba lagi
+          </button>
+        </div>
+      )}
+
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {[
+          { label: 'Total aktivitas dimuat', value: logs.length, style: 'text-slate-900' },
+          { label: 'Penambahan data', value: logs.filter((log) => log.action === 'INSERT').length, style: 'text-emerald-700' },
+          { label: 'Perubahan & penghapusan', value: logs.filter((log) => log.action !== 'INSERT').length, style: 'text-blue-700' },
+        ].map((stat) => (
+          <div key={stat.label} className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+            <p className="text-sm font-medium text-slate-500">{stat.label}</p>
+            <p className={`mt-2 text-3xl font-bold ${stat.style}`}>{fetching ? '—' : stat.value.toLocaleString('id-ID')}</p>
+          </div>
+        ))}
       </div>
 
       <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm mb-6">
@@ -160,6 +214,14 @@ export default function HistoryPage() {
         <p className="text-xs text-slate-500 mt-3">
           Menampilkan <span className="font-bold text-slate-700">{filteredLogs.length}</span> dari {logs.length} aktivitas
         </p>
+        <button
+          type="button"
+          onClick={exportHistory}
+          disabled={filteredLogs.length === 0}
+          className="mt-4 inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Download size={16} /> Export histori (CSV)
+        </button>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { User, Lock, Save, Mail, Shield } from 'lucide-react'
+import { User, Lock, Save, Shield, ShieldCheck } from 'lucide-react'
 
 export default function ProfilePage() {
   const [email, setEmail] = useState('')
@@ -12,41 +12,72 @@ export default function ProfilePage() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [loadingProfile, setLoadingProfile] = useState(false)
   const [loadingPassword, setLoadingPassword] = useState(false)
+  const [fetching, setFetching] = useState(true)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
   useEffect(() => {
-    const fetchProfile = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        setEmail(user.email || '')
-        const { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).single()
-        if (prof) {
-          setFullName(prof.full_name || '')
-          setRole(prof.role || 'staff')
+    const request = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const { data: { user }, error: userError } = await supabase.auth.getUser()
+          if (userError) throw userError
+          if (!user) {
+            setError('Sesi login tidak ditemukan. Silakan masuk kembali.')
+            return
+          }
+          setEmail(user.email || '')
+          const { data: profile, error: profileError } = await supabase
+            .from('profiles')
+            .select('full_name, role')
+            .eq('id', user.id)
+            .single()
+          if (profileError) throw profileError
+          setFullName(profile.full_name || '')
+          setRole(profile.role || 'staff')
+        } catch (profileError) {
+          console.error('Gagal memuat profil:', profileError)
+          setError('Profil belum dapat dimuat. Coba muat ulang halaman.')
+        } finally {
+          setFetching(false)
         }
-      }
-    }
-    fetchProfile()
+      })()
+    }, 0)
+    return () => window.clearTimeout(request)
   }, [])
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault()
+    const trimmedName = fullName.trim()
+    if (!trimmedName) {
+      setError('Nama lengkap tidak boleh kosong.')
+      return
+    }
     setLoadingProfile(true)
     setMessage('')
     setError('')
 
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { setError('Sesi habis.'); setLoadingProfile(false); return }
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      if (userError) throw userError
+      if (!user) {
+        setError('Sesi login habis. Silakan masuk kembali.')
+        return
+      }
 
-    const { error } = await supabase
-      .from('profiles')
-      .update({ full_name: fullName })
-      .eq('id', user.id)
-
-    if (error) setError('Gagal update: ' + error.message)
-    else setMessage('Profil berhasil diupdate!')
-    setLoadingProfile(false)
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ full_name: trimmedName })
+        .eq('id', user.id)
+      if (updateError) throw updateError
+      setFullName(trimmedName)
+      setMessage('Profil berhasil diperbarui.')
+    } catch (profileError) {
+      console.error('Gagal memperbarui profil:', profileError)
+      setError('Profil gagal diperbarui. Periksa koneksi lalu coba lagi.')
+    } finally {
+      setLoadingProfile(false)
+    }
   }
 
   const handleUpdatePassword = async (e: React.FormEvent) => {
@@ -58,15 +89,18 @@ export default function ProfilePage() {
     setMessage('')
     setError('')
 
-    const { error } = await supabase.auth.updateUser({ password: newPassword })
-
-    if (error) setError('Gagal ganti password: ' + error.message)
-    else {
-      setMessage('Password berhasil diganti!')
+    try {
+      const { error: passwordError } = await supabase.auth.updateUser({ password: newPassword })
+      if (passwordError) throw passwordError
+      setMessage('Password berhasil diganti.')
       setNewPassword('')
       setConfirmPassword('')
+    } catch (passwordError) {
+      console.error('Gagal mengganti password:', passwordError)
+      setError('Password gagal diperbarui. Pastikan koneksi aktif lalu coba lagi.')
+    } finally {
+      setLoadingPassword(false)
     }
-    setLoadingPassword(false)
   }
 
   return (
@@ -81,13 +115,19 @@ export default function ProfilePage() {
         </div>
       </div>
 
+      {fetching && (
+        <div className="mb-6 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 text-sm font-medium text-slate-500 shadow-sm">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-500/30 border-t-emerald-600" />
+          Memuat informasi akun...
+        </div>
+      )}
       {message && (
-        <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 p-4 rounded-xl mb-6 text-sm font-medium">
+        <div role="status" className="bg-emerald-50 border border-emerald-200 text-emerald-700 p-4 rounded-xl mb-6 text-sm font-medium">
           ✓ {message}
         </div>
       )}
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl mb-6 text-sm font-medium">
+        <div role="alert" className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl mb-6 text-sm font-medium">
           ⚠ {error}
         </div>
       )}
@@ -95,14 +135,16 @@ export default function ProfilePage() {
       {/* Informasi Akun */}
       <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm mb-6">
         <div className="flex items-center gap-3 mb-6 pb-5 border-b border-slate-100">
-          <Mail className="text-slate-400" size={20} />
+          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+            <User size={20} />
+          </span>
           <div>
-            <p className="text-sm text-slate-500">Email</p>
-            <p className="font-semibold text-slate-900">{email}</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Akun aktif</p>
+            <p className="mt-1 font-semibold text-slate-900">{email || '—'}</p>
           </div>
-          <div className="ml-auto flex items-center gap-2 px-4 py-2 bg-purple-50 rounded-lg">
+          <div className="ml-auto flex items-center gap-2 rounded-full border border-purple-100 bg-purple-50 px-3 py-2">
             <Shield size={16} className="text-purple-600" />
-            <span className="text-sm font-semibold text-purple-700 capitalize">{role}</span>
+            <span className="text-xs font-bold text-purple-700 capitalize">{role || 'staff'}</span>
           </div>
         </div>
 
@@ -114,13 +156,15 @@ export default function ProfilePage() {
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               placeholder="Masukkan nama lengkap"
+              maxLength={100}
+              disabled={fetching}
               className="w-full px-4 py-3 border border-slate-200 rounded-xl text-slate-900 focus:ring-2 focus:ring-emerald-500 outline-none transition"
               required
             />
           </div>
           <button
             type="submit"
-            disabled={loadingProfile}
+            disabled={loadingProfile || fetching}
             className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white font-semibold px-6 py-3 rounded-xl transition-all shadow-lg shadow-emerald-500/25 disabled:opacity-50"
           >
             <Save size={18} />
@@ -132,7 +176,9 @@ export default function ProfilePage() {
       {/* Ganti Password */}
       <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm">
         <div className="flex items-center gap-3 mb-6 pb-5 border-b border-slate-100">
-          <Lock className="text-slate-400" size={20} />
+          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+            <ShieldCheck size={20} />
+          </span>
           <div>
             <h2 className="text-lg font-bold text-slate-900">Ganti Password</h2>
             <p className="text-sm text-slate-500">Minimal 6 karakter untuk keamanan</p>
@@ -147,6 +193,9 @@ export default function ProfilePage() {
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               placeholder="••••••••"
+              autoComplete="new-password"
+              minLength={6}
+              maxLength={72}
               className="w-full px-4 py-3 border border-slate-200 rounded-xl text-slate-900 focus:ring-2 focus:ring-emerald-500 outline-none transition"
               required
             />
@@ -158,6 +207,9 @@ export default function ProfilePage() {
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               placeholder="••••••••"
+              autoComplete="new-password"
+              minLength={6}
+              maxLength={72}
               className="w-full px-4 py-3 border border-slate-200 rounded-xl text-slate-900 focus:ring-2 focus:ring-emerald-500 outline-none transition"
               required
             />

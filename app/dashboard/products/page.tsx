@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Package, Plus, Pencil, Trash2, X, Check, Search, AlertTriangle, TrendingUp } from 'lucide-react'
+import { Package, Plus, Pencil, Trash2, X, Check, Search, AlertTriangle, TrendingUp, RefreshCw, Filter } from 'lucide-react'
 
 type Category = { id: number, name: string }
 type Product = {
@@ -12,15 +12,18 @@ type Product = {
   color: string
   min_stock: number
   category_id: number
-  categories: { name: string }
+  categories: { name: string } | null
   total_stock: number
   locations_count: number
+  transaction_count: number
 }
 
-type ProductRecord = Omit<Product, 'total_stock' | 'locations_count'> & {
+type ProductRecord = Omit<Product, 'total_stock' | 'locations_count' | 'transaction_count'> & {
   categories: { name: string } | { name: string }[] | null
 }
 type StockRecord = { product_id: number; current_stock: number }
+type TransactionRecord = { product_id: number }
+type StockFilter = 'ALL' | 'SAFE' | 'LOW' | 'EMPTY'
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
@@ -32,40 +35,62 @@ export default function ProductsPage() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editMinStock, setEditMinStock] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
+  const [filterCategory, setFilterCategory] = useState('ALL')
+  const [filterStock, setFilterStock] = useState<StockFilter>('ALL')
   const [loading, setLoading] = useState(false)
   const [fetching, setFetching] = useState(true)
+  const [errorMessage, setErrorMessage] = useState('')
 
   const fetchData = async () => {
     setFetching(true)
 
-    // Ambil kategori
-    const { data: catData } = await supabase.from('categories').select('id, name').order('name')
-    if (catData) setCategories(catData)
+    try {
+      const [categoryResult, productResult, stockResult, transactionResult] = await Promise.all([
+        supabase.from('categories').select('id, name').order('name'),
+        supabase
+          .from('products')
+          .select('id, sku, size, color, min_stock, category_id, categories ( name )')
+          .order('sku', { ascending: true }),
+        supabase.from('stocks').select('product_id, location_id, current_stock'),
+        supabase.from('transactions').select('product_id'),
+      ])
+      const failedResult = [categoryResult, productResult, stockResult, transactionResult]
+        .find((result) => result.error)
+      if (failedResult?.error) {
+        console.error('Gagal memuat master produk:', failedResult.error.message)
+        setErrorMessage('Data produk belum dapat dimuat. Periksa koneksi lalu coba lagi.')
+        return
+      }
 
-    // Ambil produk + join kategori
-    const { data: prodData } = await supabase
-      .from('products')
-      .select('id, sku, size, color, min_stock, category_id, categories ( name )')
-      .order('sku', { ascending: true })
+      const stockTotals = new Map<number, { total: number; locations: number }>()
+      ;((stockResult.data ?? []) as StockRecord[]).forEach(({ product_id, current_stock }) => {
+        const stats = stockTotals.get(product_id) ?? { total: 0, locations: 0 }
+        stats.total += current_stock
+        if (current_stock > 0) stats.locations += 1
+        stockTotals.set(product_id, stats)
+      })
+      const transactionCounts = new Map<number, number>()
+      ;((transactionResult.data ?? []) as TransactionRecord[]).forEach(({ product_id }) => {
+        transactionCounts.set(product_id, (transactionCounts.get(product_id) ?? 0) + 1)
+      })
 
-    // Ambil semua stocks
-    const { data: stocksData } = await supabase
-      .from('stocks')
-      .select('product_id, location_id, current_stock')
-
-    // Gabungkan: hitung total_stock & locations_count per produk
-    const productRows = (prodData ?? []) as ProductRecord[]
-    const stockRows = (stocksData ?? []) as StockRecord[]
-    const merged: Product[] = productRows.map((product) => {
-      const productStocks = stockRows.filter((stock) => stock.product_id === product.id)
-      const totalStock = productStocks.reduce((sum, stock) => sum + stock.current_stock, 0)
-      const locationsCount = productStocks.filter((stock) => stock.current_stock > 0).length
-      const category = Array.isArray(product.categories) ? product.categories[0] ?? null : product.categories
-      return { ...product, categories: category, total_stock: totalStock, locations_count: locationsCount }
-    })
-
-    setProducts(merged)
-    setFetching(false)
+      const merged: Product[] = ((productResult.data ?? []) as ProductRecord[]).map((product) => {
+        const category = Array.isArray(product.categories) ? product.categories[0] ?? null : product.categories
+        const stats = stockTotals.get(product.id)
+        return {
+          ...product,
+          categories: category,
+          total_stock: stats?.total ?? 0,
+          locations_count: stats?.locations ?? 0,
+          transaction_count: transactionCounts.get(product.id) ?? 0,
+        }
+      })
+      setCategories(categoryResult.data ?? [])
+      setProducts(merged)
+      setErrorMessage('')
+    } finally {
+      setFetching(false)
+    }
   }
 
   useEffect(() => {
@@ -76,29 +101,52 @@ export default function ProductsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
-    const selectedCategory = categories.find(c => c.id === parseInt(categoryId))
-    if (!selectedCategory) { alert('Pilih kategori dulu!'); setLoading(false); return }
+    const parsedMinStock = Number(minStock)
+    const selectedCategory = categories.find(c => c.id === Number(categoryId))
+    if (!selectedCategory) {
+      setErrorMessage('Pilih kategori sebelum menyimpan produk.')
+      setLoading(false)
+      return
+    }
+    if (!size.trim() || !color.trim() || !Number.isInteger(parsedMinStock) || parsedMinStock < 0) {
+      setErrorMessage('Lengkapi ukuran, warna, dan batas minimum stok yang valid.')
+      setLoading(false)
+      return
+    }
 
-    const generatedSku = `${selectedCategory.name}-${size}-${color}`.toUpperCase()
+    const generatedSku = `${selectedCategory.name}-${size.trim()}-${color.trim()}`.toUpperCase()
 
-    const { error } = await supabase.from('products').insert([{
-      sku: generatedSku,
-      category_id: parseInt(categoryId),
-      size: size.toUpperCase(),
-      color: color.toUpperCase(),
-      min_stock: parseInt(minStock)
-    }])
-
-    if (error) alert('Gagal: ' + error.message)
-    else { setSize(''); setColor(''); fetchData() }
-    setLoading(false)
+    try {
+      const { error } = await supabase.from('products').insert([{
+        sku: generatedSku,
+        category_id: Number(categoryId),
+        size: size.trim().toUpperCase(),
+        color: color.trim().toUpperCase(),
+        min_stock: parsedMinStock,
+      }])
+      if (error) {
+        console.error('Gagal menambahkan produk:', error.message)
+        setErrorMessage('Produk gagal disimpan. SKU mungkin sudah terdaftar.')
+      } else {
+        setSize('')
+        setColor('')
+        setErrorMessage('')
+        await fetchData()
+      }
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleDelete = async (id: number, sku: string) => {
-    if (!confirm(`Yakin hapus produk "${sku}"? Semua data stok & transaksi terkait akan hilang.`)) return
+    const product = products.find((item) => item.id === id)
+    if (!product || product.total_stock > 0 || product.transaction_count > 0) return
+    if (!confirm(`Hapus produk "${sku}"?`)) return
     const { error } = await supabase.from('products').delete().eq('id', id)
-    if (error) alert('Gagal hapus: ' + error.message)
-    else fetchData()
+    if (error) {
+      console.error('Gagal menghapus produk:', error.message)
+      setErrorMessage('Produk tidak dapat dihapus. Periksa apakah masih memiliki riwayat.')
+    } else await fetchData()
   }
 
   const startEdit = (prod: Product) => {
@@ -107,20 +155,36 @@ export default function ProductsPage() {
   }
   const cancelEdit = () => { setEditingId(null); setEditMinStock('') }
   const saveEdit = async () => {
-    if (!editingId) return
+    const parsedMinStock = Number(editMinStock)
+    if (!editingId || !Number.isInteger(parsedMinStock) || parsedMinStock < 0) {
+      setErrorMessage('Batas minimum stok harus berupa angka nol atau lebih.')
+      return
+    }
     const { error } = await supabase
       .from('products')
-      .update({ min_stock: parseInt(editMinStock) })
+      .update({ min_stock: parsedMinStock })
       .eq('id', editingId)
-    if (error) alert('Gagal update: ' + error.message)
-    else { cancelEdit(); fetchData() }
+    if (error) {
+      console.error('Gagal memperbarui produk:', error.message)
+      setErrorMessage('Batas stok gagal diperbarui.')
+    } else { cancelEdit(); await fetchData() }
   }
 
   const filteredProducts = products.filter(p =>
     searchQuery === '' ||
     p.sku.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.categories?.name?.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+    p.categories?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    p.size.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    p.color.toLowerCase().includes(searchQuery.toLowerCase())
+  ).filter((product) => {
+    const categoryMatches = filterCategory === 'ALL' || product.category_id === Number(filterCategory)
+    const stockMatches =
+      filterStock === 'ALL' ||
+      (filterStock === 'EMPTY' && product.total_stock === 0) ||
+      (filterStock === 'LOW' && product.total_stock > 0 && product.total_stock <= product.min_stock) ||
+      (filterStock === 'SAFE' && product.total_stock > product.min_stock)
+    return categoryMatches && stockMatches
+  })
 
   // Hitung statistik
   const stats = {
@@ -141,6 +205,15 @@ export default function ProductsPage() {
           <p className="text-slate-500">Kelola varian barang beserta total stok real-time.</p>
         </div>
       </div>
+
+      {errorMessage && (
+        <div role="alert" className="mb-5 flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <span>{errorMessage}</span>
+          <button type="button" onClick={() => void fetchData()} className="inline-flex items-center gap-1 font-semibold">
+            <RefreshCw size={14} /> Coba lagi
+          </button>
+        </div>
+      )}
 
       {/* STATS CARDS */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
@@ -216,13 +289,47 @@ export default function ProductsPage() {
         <div className="relative">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input
-            type="text"
+            type="search"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Cari SKU atau kategori..."
+            placeholder="Cari SKU, kategori, ukuran, atau warna..."
+            aria-label="Cari produk"
             className="w-full pl-11 pr-4 py-3 border border-slate-200 rounded-xl text-slate-900 focus:ring-2 focus:ring-emerald-500 outline-none transition"
           />
         </div>
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label className="relative">
+            <span className="sr-only">Filter kategori</span>
+            <Filter className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <select
+              value={filterCategory}
+              onChange={(event) => setFilterCategory(event.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-4 text-sm text-slate-700 outline-none focus:border-emerald-500"
+            >
+              <option value="ALL">Semua kategori</option>
+              {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+            </select>
+          </label>
+          <label>
+            <span className="sr-only">Filter status stok</span>
+            <select
+              value={filterStock}
+              onChange={(event) => {
+                const value = event.target.value
+                if (value === 'ALL' || value === 'SAFE' || value === 'LOW' || value === 'EMPTY') setFilterStock(value)
+              }}
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-emerald-500"
+            >
+              <option value="ALL">Semua status stok</option>
+              <option value="SAFE">Stok aman</option>
+              <option value="LOW">Stok menipis</option>
+              <option value="EMPTY">Stok kosong</option>
+            </select>
+          </label>
+        </div>
+        <p className="mt-3 text-xs text-slate-500">
+          Menampilkan <span className="font-semibold text-slate-700">{filteredProducts.length}</span> dari {products.length} produk
+        </p>
       </div>
 
       {/* Tabel Produk */}
@@ -247,7 +354,7 @@ export default function ProductsPage() {
                 <tr><td colSpan={9} className="px-8 py-10 text-center text-slate-400">Memuat data...</td></tr>
               ) : filteredProducts.length === 0 ? (
                 <tr><td colSpan={9} className="px-8 py-10 text-center text-slate-400">
-                  {searchQuery ? 'Tidak ada produk yang cocok.' : 'Belum ada produk.'}
+                  {searchQuery || filterCategory !== 'ALL' || filterStock !== 'ALL' ? 'Tidak ada produk yang cocok.' : 'Belum ada produk.'}
                 </td></tr>
               ) : (
                 filteredProducts.map((prod) => {
@@ -261,7 +368,7 @@ export default function ProductsPage() {
                       <td className="px-6 py-4 text-slate-600">{prod.color}</td>
                       <td className="px-6 py-4">
                         {editingId === prod.id ? (
-                          <input type="number" value={editMinStock} onChange={(e) => setEditMinStock(e.target.value)}
+                          <input type="number" min="0" value={editMinStock} onChange={(e) => setEditMinStock(e.target.value)}
                             className="w-20 px-2 py-1 border border-emerald-300 rounded-lg text-sm" />
                         ) : (
                           <span className="text-slate-600">{prod.min_stock}</span>
@@ -287,13 +394,13 @@ export default function ProductsPage() {
                       <td className="px-6 py-4 text-right">
                         {editingId === prod.id ? (
                           <div className="flex items-center justify-end gap-2">
-                            <button onClick={saveEdit} className="p-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded-lg transition"><Check size={16} /></button>
-                            <button onClick={cancelEdit} className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition"><X size={16} /></button>
+                            <button onClick={saveEdit} aria-label="Simpan batas stok" className="p-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded-lg transition"><Check size={16} /></button>
+                            <button onClick={cancelEdit} aria-label="Batalkan edit" className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition"><X size={16} /></button>
                           </div>
                         ) : (
                           <div className="flex items-center justify-end gap-2">
-                            <button onClick={() => startEdit(prod)} className="p-2 bg-slate-100 hover:bg-emerald-100 text-slate-600 hover:text-emerald-700 rounded-lg transition"><Pencil size={16} /></button>
-                            <button onClick={() => handleDelete(prod.id, prod.sku)} className="p-2 bg-slate-100 hover:bg-red-100 text-slate-600 hover:text-red-700 rounded-lg transition"><Trash2 size={16} /></button>
+                            <button onClick={() => startEdit(prod)} aria-label={`Edit ${prod.sku}`} className="p-2 bg-slate-100 hover:bg-emerald-100 text-slate-600 hover:text-emerald-700 rounded-lg transition"><Pencil size={16} /></button>
+                            <button onClick={() => void handleDelete(prod.id, prod.sku)} disabled={prod.total_stock > 0 || prod.transaction_count > 0} title={prod.total_stock > 0 || prod.transaction_count > 0 ? 'Produk masih memiliki stok atau riwayat transaksi' : 'Hapus produk'} aria-label={`Hapus ${prod.sku}`} className="p-2 bg-slate-100 hover:bg-red-100 text-slate-600 hover:text-red-700 rounded-lg transition disabled:cursor-not-allowed disabled:opacity-40"><Trash2 size={16} /></button>
                           </div>
                         )}
                       </td>

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { ArrowRightLeft, Plus, Pencil, X, Check } from 'lucide-react'
+import { ArrowRightLeft, Plus, Pencil, X, Check, Search, Download, RefreshCw } from 'lucide-react'
 
 type Product = { id: number, sku: string }
 type Location = { id: number, code: string }
@@ -14,6 +14,7 @@ type Transaction = {
   notes: string
   product_id: number
   location_id: number
+  user_id: string | null
   products: { sku: string }
   locations: { code: string }
   profiles: { full_name: string, email: string } | null
@@ -23,8 +24,8 @@ type TransactionRecord = Omit<Transaction, 'products' | 'locations' | 'profiles'
   products: { sku: string } | { sku: string }[] | null
   locations: { code: string } | { code: string }[] | null
 }
-type TransactionUser = { id: number; user_id: string | null }
 type TransactionProfile = { id: string; full_name: string; email: string }
+type TransactionFilter = 'ALL' | 'IN' | 'OUT'
 
 function firstRelated<T>(relationship: T | T[] | null | undefined): T | undefined {
   return Array.isArray(relationship) ? relationship[0] : relationship ?? undefined
@@ -45,6 +46,11 @@ export default function TransactionsPage() {
   const [notes, setNotes] = useState('')
   const [loading, setLoading] = useState(false)
   const [fetching, setFetching] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [filterType, setFilterType] = useState<TransactionFilter>('ALL')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [errorMessage, setErrorMessage] = useState('')
 
   // Edit state
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -66,33 +72,18 @@ export default function TransactionsPage() {
     // Ambil transaksi + join produk & lokasi
     const { data: trxData, error } = await supabase
       .from('transactions')
-      .select('id, type, quantity, transaction_date, notes, product_id, location_id, products ( sku ), locations ( code )')
+      .select('id, type, quantity, transaction_date, notes, product_id, location_id, user_id, products ( sku ), locations ( code )')
       .order('transaction_date', { ascending: false })
       .limit(100)
 
     if (error) {
       console.error('Error fetching transactions:', error.message)
+      setErrorMessage('Transaksi gagal dimuat. Periksa koneksi lalu coba lagi.')
       setFetching(false)
       return
     }
 
-    // Ambil user_id via query terpisah
     const transactionRows = (trxData ?? []) as TransactionRecord[]
-    const trxIds = transactionRows.map((transaction) => transaction.id)
-    let userRows: TransactionUser[] = []
-    if (trxIds.length > 0) {
-      const { data: userData, error: userError } = await supabase
-        .from('transactions')
-        .select('id, user_id')
-        .in('id', trxIds)
-      if (userError) {
-        console.error('Error fetching transaction users:', userError.message)
-      } else {
-        userRows = (userData ?? []) as TransactionUser[]
-      }
-    }
-
-    // Ambil profiles
     const { data: profilesData, error: profilesError } = await supabase
       .from('profiles')
       .select('id, full_name, email')
@@ -101,8 +92,7 @@ export default function TransactionsPage() {
 
     // Gabungkan data
     const merged: Transaction[] = transactionRows.map((trx) => {
-      const userRec = userRows.find((user) => user.id === trx.id)
-      const profile = profileRows.find((item) => item.id === userRec?.user_id)
+      const profile = profileRows.find((item) => item.id === trx.user_id)
       return {
         ...trx,
         products: firstRelated(trx.products) ?? { sku: '' },
@@ -113,6 +103,7 @@ export default function TransactionsPage() {
     })
 
     setTransactions(merged)
+    setErrorMessage('')
     setFetching(false)
   }
 
@@ -124,32 +115,59 @@ export default function TransactionsPage() {
   // Simpan transaksi baru
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
-
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      alert('Sesi login habis. Silakan login ulang.')
-      setLoading(false)
+    const parsedQuantity = Number(quantity)
+    if (!productId || !locationId || !Number.isInteger(parsedQuantity) || parsedQuantity < 1) {
+      setErrorMessage('Pilih produk, lokasi, dan jumlah minimal 1 unit.')
       return
     }
+    setLoading(true)
 
-    const { error } = await supabase.from('transactions').insert([{
-      product_id: parseInt(productId),
-      location_id: parseInt(locationId),
-      user_id: user.id,
-      type: type,
-      quantity: parseInt(quantity),
-      notes: notes
-    }])
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        setErrorMessage('Sesi login habis. Silakan login ulang.')
+        return
+      }
 
-    if (error) {
-      alert('Gagal menyimpan transaksi: ' + error.message)
-    } else {
-      setQuantity('')
-      setNotes('')
-      fetchData()
+      if (type === 'OUT') {
+        const { data: stock, error: stockError } = await supabase
+          .from('stocks')
+          .select('current_stock')
+          .eq('product_id', Number(productId))
+          .eq('location_id', Number(locationId))
+          .maybeSingle()
+        if (stockError) {
+          console.error('Gagal memeriksa stok sebelum transaksi:', stockError.message)
+          setErrorMessage('Stok belum dapat diverifikasi. Coba lagi sebelum menyimpan.')
+          return
+        }
+        if (!stock || stock.current_stock < parsedQuantity) {
+          setErrorMessage(`Stok di lokasi ini tidak cukup. Stok tersedia: ${stock?.current_stock ?? 0} unit.`)
+          return
+        }
+      }
+
+      const { error } = await supabase.from('transactions').insert([{
+        product_id: Number(productId),
+        location_id: Number(locationId),
+        user_id: user.id,
+        type,
+        quantity: parsedQuantity,
+        notes: notes.trim(),
+      }])
+
+      if (error) {
+        console.error('Gagal menyimpan transaksi:', error.message)
+        setErrorMessage('Transaksi gagal disimpan. Periksa kembali stok dan data yang dipilih.')
+      } else {
+        setQuantity('')
+        setNotes('')
+        setErrorMessage('')
+        await fetchData()
+      }
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   // Mulai edit
@@ -171,15 +189,25 @@ export default function TransactionsPage() {
     setEditLocationId('')
   }
 
-  // Simpan edit (delete lama + insert baru agar stok auto-adjust)
+  // Recreate edited rows so existing database inventory triggers still run.
   const saveEdit = async () => {
     if (!editingId) return
+    const original = transactions.find((transaction) => transaction.id === editingId)
+    if (!original) {
+      setErrorMessage('Transaksi yang akan diedit tidak ditemukan. Muat ulang data.')
+      return
+    }
 
+    const parsedQuantity = Number(editQty)
+    if (!editProductId || !editLocationId || !Number.isInteger(parsedQuantity) || parsedQuantity < 1) {
+      setErrorMessage('Pilih produk, lokasi, dan jumlah minimal 1 unit.')
+      return
+    }
     if (!confirm('Simpan perubahan? Stok akan otomatis disesuaikan.')) return
 
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
-      alert('Sesi login habis.')
+      setErrorMessage('Sesi login habis. Silakan login ulang.')
       return
     }
 
@@ -190,7 +218,8 @@ export default function TransactionsPage() {
       .eq('id', editingId)
 
     if (delErr) {
-      alert('Gagal update transaksi: ' + delErr.message)
+      console.error('Gagal membatalkan transaksi lama:', delErr.message)
+      setErrorMessage('Perubahan gagal disimpan. Transaksi lama tetap dipertahankan.')
       return
     }
 
@@ -200,17 +229,73 @@ export default function TransactionsPage() {
       location_id: parseInt(editLocationId),
       user_id: user.id,
       type: editType,
-      quantity: parseInt(editQty),
+      quantity: parsedQuantity,
       notes: editNotes,
       transaction_date: new Date().toISOString()
     }])
 
     if (insErr) {
-      alert('Gagal simpan perubahan: ' + insErr.message)
+      console.error('Gagal menyimpan transaksi hasil edit:', insErr.message)
+      const { error: restoreError } = await supabase.from('transactions').insert([{
+        product_id: original.product_id,
+        location_id: original.location_id,
+        user_id: original.user_id,
+        type: original.type,
+        quantity: original.quantity,
+        notes: original.notes,
+        transaction_date: original.transaction_date,
+      }])
+      if (restoreError) {
+        console.error('Gagal memulihkan transaksi awal:', restoreError.message)
+        setErrorMessage('Transaksi gagal diedit dan pemulihan otomatis gagal. Segera periksa stok dan catat ulang transaksi.')
+      } else {
+        setErrorMessage('Perubahan gagal disimpan. Transaksi awal sudah dipulihkan.')
+        await fetchData()
+      }
     } else {
       cancelEdit()
-      fetchData()
+      setErrorMessage('')
+      await fetchData()
     }
+  }
+
+  const filteredTransactions = transactions.filter((transaction) => {
+    const matchesType = filterType === 'ALL' || transaction.type === filterType
+    const query = searchQuery.trim().toLowerCase()
+    const matchesSearch = !query ||
+      transaction.products?.sku?.toLowerCase().includes(query) ||
+      transaction.locations?.code?.toLowerCase().includes(query) ||
+      transaction.notes?.toLowerCase().includes(query) ||
+      transaction.profiles?.full_name?.toLowerCase().includes(query) ||
+      transaction.profiles?.email?.toLowerCase().includes(query)
+    const transactionDate = new Date(transaction.transaction_date).toLocaleDateString('en-CA')
+    const matchesFrom = !dateFrom || transactionDate >= dateFrom
+    const matchesTo = !dateTo || transactionDate <= dateTo
+    return matchesType && matchesSearch && matchesFrom && matchesTo
+  })
+
+  const exportTransactions = () => {
+    if (filteredTransactions.length === 0) return
+    const escapeCsv = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`
+    const rows = filteredTransactions.map((transaction) => [
+      transaction.transaction_date,
+      transaction.type,
+      transaction.products?.sku ?? '',
+      transaction.locations?.code ?? '',
+      transaction.quantity,
+      transaction.profiles?.full_name ?? transaction.profiles?.email ?? 'System',
+      transaction.notes ?? '',
+    ])
+    const csv = [
+      ['Tanggal', 'Tipe', 'SKU', 'Lokasi', 'Jumlah', 'Petugas', 'Catatan'],
+      ...rows,
+    ].map((row) => row.map(escapeCsv).join(',')).join('\r\n')
+    const url = URL.createObjectURL(new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8;' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `Transaksi_${new Date().toISOString().slice(0, 10)}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
   }
 
   return (
@@ -224,6 +309,15 @@ export default function TransactionsPage() {
           <p className="text-slate-500">Input barang masuk (IN) dan barang keluar (OUT).</p>
         </div>
       </div>
+
+      {errorMessage && (
+        <div role="alert" className="mb-5 flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <span>{errorMessage}</span>
+          <button type="button" onClick={() => void fetchData()} className="inline-flex shrink-0 items-center gap-1 font-semibold">
+            <RefreshCw size={14} /> Muat ulang
+          </button>
+        </div>
+      )}
 
       {/* Form Input Transaksi */}
       <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm mb-8">
@@ -275,6 +369,7 @@ export default function TransactionsPage() {
               onChange={(e) => setQuantity(e.target.value)}
               placeholder="0"
               min="1"
+              step="1"
               className="w-full px-4 py-3 border border-slate-200 rounded-xl text-slate-900 focus:ring-2 focus:ring-emerald-500 outline-none"
               required
             />
@@ -310,6 +405,51 @@ export default function TransactionsPage() {
 
       {/* Tabel Riwayat Transaksi */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="grid grid-cols-1 gap-3 border-b border-slate-100 p-4 sm:grid-cols-2 xl:grid-cols-[minmax(240px,1fr)_170px_160px_160px_auto]">
+          <label className="relative">
+            <span className="sr-only">Cari transaksi</span>
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Cari SKU, rak, catatan, petugas..."
+              className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-3 text-sm text-slate-800 outline-none focus:border-emerald-500"
+            />
+          </label>
+          <select
+            value={filterType}
+            onChange={(event) => {
+              const value = event.target.value
+              if (value === 'ALL' || value === 'IN' || value === 'OUT') setFilterType(value)
+            }}
+            aria-label="Filter tipe transaksi"
+            className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-emerald-500"
+          >
+            <option value="ALL">Semua transaksi</option>
+            <option value="IN">Barang masuk</option>
+            <option value="OUT">Barang keluar</option>
+          </select>
+          <label className="text-xs text-slate-500">
+            <span className="mb-1 block">Dari tanggal</span>
+            <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-700" />
+          </label>
+          <label className="text-xs text-slate-500">
+            <span className="mb-1 block">Sampai tanggal</span>
+            <input type="date" value={dateTo} min={dateFrom || undefined} onChange={(event) => setDateTo(event.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-700" />
+          </label>
+          <button
+            type="button"
+            onClick={exportTransactions}
+            disabled={filteredTransactions.length === 0}
+            className="inline-flex items-center justify-center gap-2 self-end rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Download size={16} /> Export CSV
+          </button>
+          <p className="text-xs text-slate-500 sm:col-span-2 xl:col-span-5">
+            Menampilkan <span className="font-semibold text-slate-700">{filteredTransactions.length}</span> dari {transactions.length} transaksi terakhir
+          </p>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead className="bg-slate-50 border-b border-slate-100">
@@ -326,12 +466,14 @@ export default function TransactionsPage() {
                 <tr>
                   <td colSpan={8} className="px-8 py-10 text-center text-slate-400">Memuat data...</td>
                 </tr>
-              ) : transactions.length === 0 ? (
+              ) : filteredTransactions.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-8 py-10 text-center text-slate-400">Belum ada transaksi.</td>
+                  <td colSpan={8} className="px-8 py-10 text-center text-slate-400">
+                    {transactions.length === 0 ? 'Belum ada transaksi.' : 'Tidak ada transaksi yang cocok dengan filter.'}
+                  </td>
                 </tr>
               ) : (
-                transactions.map((trx) => (
+                filteredTransactions.map((trx) => (
                   <tr
                     key={trx.id}
                     className={`border-b border-slate-50 hover:bg-slate-50 transition ${editingId === trx.id ? 'bg-emerald-50/50' : ''}`}

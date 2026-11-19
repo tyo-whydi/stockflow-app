@@ -12,6 +12,10 @@ type StockRow = {
   products: { sku: string, min_stock: number, categories: { name: string } | null }
   locations: { code: string }
 }
+type CatalogProduct = { id: number; sku: string; min_stock: number; categories: CategoryRecord | null }
+type CatalogProductRecord = Omit<CatalogProduct, 'categories'> & {
+  categories: CategoryRecord | CategoryRecord[] | null
+}
 
 type CategoryRecord = { name: string }
 type ProductRecord = {
@@ -32,6 +36,7 @@ function firstRelated<T>(relationship: T | T[] | null | undefined): T | undefine
 
 export default function StockPage() {
   const [stocks, setStocks] = useState<StockRow[]>([])
+  const [catalog, setCatalog] = useState<CatalogProduct[]>([])
   const [fetching, setFetching] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'AMAN' | 'MENIPIS' | 'KOSONG'>('ALL')
@@ -39,22 +44,24 @@ export default function StockPage() {
 
   const fetchStocks = async () => {
     setFetching(true)
-    const { data, error } = await supabase
-      .from('stocks')
-      .select(`
+    const [stockResult, productResult] = await Promise.all([
+      supabase.from('stocks').select(`
         id, current_stock, product_id, location_id,
         products ( sku, min_stock, categories ( name ) ),
         locations ( code )
       `)
-      .order('current_stock', { ascending: false })
+        .order('current_stock', { ascending: false }),
+      supabase.from('products').select('id, sku, min_stock, categories ( name )').order('sku'),
+    ])
 
-    if (error) {
-      console.error('Gagal memuat stok:', error.message)
+    if (stockResult.error || productResult.error) {
+      const error = stockResult.error ?? productResult.error
+      console.error('Gagal memuat stok:', error?.message)
       setFetching(false)
       return
     }
-    if (data) {
-      const rows = data as StockRecord[]
+    if (stockResult.data) {
+      const rows = stockResult.data as StockRecord[]
       setStocks(rows.map((row) => {
         const product = firstRelated(row.products)
         const category = firstRelated(product?.categories)
@@ -66,6 +73,10 @@ export default function StockPage() {
         } as StockRow
       }))
     }
+    setCatalog(((productResult.data ?? []) as CatalogProductRecord[]).map((product) => ({
+      ...product,
+      categories: firstRelated(product.categories) ?? null,
+    })))
     setFetching(false)
   }
 
@@ -74,15 +85,26 @@ export default function StockPage() {
     return () => window.clearTimeout(request)
   }, [])
 
+  const totalByProduct = useMemo(() => {
+    const totals = new Map<number, number>()
+    stocks.forEach((stock) => totals.set(
+      stock.product_id,
+      (totals.get(stock.product_id) ?? 0) + stock.current_stock,
+    ))
+    return totals
+  }, [stocks])
+
   // Stats
   const stats = useMemo(() => {
     const totalUnit = stocks.reduce((sum, s) => sum + s.current_stock, 0)
-    const lowStock = stocks.filter(s => s.current_stock <= (s.products?.min_stock || 10) && s.current_stock > 0).length
-    const kosong = stocks.filter(s => s.current_stock === 0).length
+    const lowStock = catalog.filter((product) => {
+      const total = totalByProduct.get(product.id) ?? 0
+      return total > 0 && total <= product.min_stock
+    }).length
+    const kosong = catalog.filter((product) => (totalByProduct.get(product.id) ?? 0) === 0).length
     const totalRak = new Set(stocks.map(s => s.locations?.code)).size
-    const totalSku = new Set(stocks.map(s => s.product_id)).size
-    return { totalUnit, lowStock, kosong, totalRak, totalSku }
-  }, [stocks])
+    return { totalUnit, lowStock, kosong, totalRak, totalSku: catalog.length }
+  }, [stocks, catalog, totalByProduct])
 
   // Filter
   const filtered = useMemo(() => {
@@ -92,15 +114,30 @@ export default function StockPage() {
         s.locations?.code?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         s.products?.categories?.name?.toLowerCase().includes(searchQuery.toLowerCase())
 
-      const min = s.products?.min_stock || 10
+      const totalForProduct = totalByProduct.get(s.product_id) ?? 0
+      const min = s.products?.min_stock ?? 10
       let matchStatus = true
-      if (filterStatus === 'AMAN') matchStatus = s.current_stock > min
-      else if (filterStatus === 'MENIPIS') matchStatus = s.current_stock <= min && s.current_stock > 0
-      else if (filterStatus === 'KOSONG') matchStatus = s.current_stock === 0
+      if (filterStatus === 'AMAN') matchStatus = totalForProduct > min
+      else if (filterStatus === 'MENIPIS') matchStatus = totalForProduct <= min && totalForProduct > 0
+      else if (filterStatus === 'KOSONG') matchStatus = totalForProduct === 0
 
       return matchSearch && matchStatus
     })
-  }, [stocks, searchQuery, filterStatus])
+  }, [stocks, searchQuery, filterStatus, totalByProduct])
+
+  const filteredProducts = useMemo(() => catalog.filter((product) => {
+    const query = searchQuery.trim().toLowerCase()
+    const matchesSearch = !query ||
+      product.sku.toLowerCase().includes(query) ||
+      product.categories?.name?.toLowerCase().includes(query)
+    const total = totalByProduct.get(product.id) ?? 0
+    const matchesStatus =
+      filterStatus === 'ALL' ||
+      (filterStatus === 'AMAN' && total > product.min_stock) ||
+      (filterStatus === 'MENIPIS' && total > 0 && total <= product.min_stock) ||
+      (filterStatus === 'KOSONG' && total === 0)
+    return matchesSearch && matchesStatus
+  }), [catalog, searchQuery, filterStatus, totalByProduct])
 
   const hasFilter = searchQuery || filterStatus !== 'ALL'
 
@@ -249,9 +286,10 @@ export default function StockPage() {
                   <tr><td colSpan={6} className="px-8 py-10 text-center text-slate-400">Tidak ada data stok.</td></tr>
                 ) : (
                   filtered.map((s) => {
-                    const min = s.products?.min_stock || 10
-                    const isLow = s.current_stock <= min && s.current_stock > 0
-                    const isZero = s.current_stock === 0
+                    const min = s.products?.min_stock ?? 10
+                    const total = totalByProduct.get(s.product_id) ?? 0
+                    const isLow = total <= min && total > 0
+                    const isZero = total === 0
                     return (
                       <tr key={s.id} className="border-b border-slate-50 hover:bg-slate-50 transition">
                         <td className="px-6 py-4 font-semibold text-emerald-700 whitespace-nowrap">{s.products?.sku}</td>
@@ -279,8 +317,7 @@ export default function StockPage() {
               </tbody>
             </table>
           ) : (
-            // VIEW PER SKU (di-group)
-            <PerSkuView stocks={filtered} fetching={fetching} />
+            <PerSkuView products={filteredProducts} stocks={stocks} fetching={fetching} />
           )}
         </div>
       </div>
@@ -291,28 +328,19 @@ export default function StockPage() {
 // ===============================
 // SUB-KOMPONEN: View Per SKU
 // ===============================
-function PerSkuView({ stocks, fetching }: { stocks: StockRow[], fetching: boolean }) {
-  // Group by SKU
-  const grouped = useMemo(() => {
-    const map: Record<string, { sku: string, category: string, min: number, total: number, perRak: { code: string, qty: number }[] }> = {}
-    stocks.forEach(s => {
-      const sku = s.products?.sku || 'Unknown'
-      if (!map[sku]) {
-        map[sku] = {
-          sku,
-          category: s.products?.categories?.name || '-',
-          min: s.products?.min_stock || 10,
-          total: 0,
-          perRak: []
-        }
-      }
-      map[sku].total += s.current_stock
-      if (s.current_stock > 0) {
-        map[sku].perRak.push({ code: s.locations?.code || '-', qty: s.current_stock })
-      }
-    })
-    return Object.values(map).sort((a, b) => a.total - b.total)
-  }, [stocks])
+function PerSkuView({ products, stocks, fetching }: { products: CatalogProduct[], stocks: StockRow[], fetching: boolean }) {
+  const grouped = useMemo(() => products.map((product) => {
+    const productStocks = stocks.filter((stock) => stock.product_id === product.id)
+    return {
+      sku: product.sku,
+      category: product.categories?.name ?? '-',
+      min: product.min_stock,
+      total: productStocks.reduce((sum, stock) => sum + stock.current_stock, 0),
+      perRak: productStocks
+        .filter((stock) => stock.current_stock > 0)
+        .map((stock) => ({ code: stock.locations?.code || '-', qty: stock.current_stock })),
+    }
+  }).sort((a, b) => a.total - b.total), [products, stocks])
 
   if (fetching) {
     return <div className="px-8 py-10 text-center text-slate-400">Memuat data...</div>
