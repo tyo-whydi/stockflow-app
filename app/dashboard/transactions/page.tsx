@@ -108,7 +108,11 @@ export default function TransactionsPage() {
   }
 
   useEffect(() => {
-    const request = window.setTimeout(() => void fetchData(), 0)
+    const request = window.setTimeout(() => {
+      const requestedType = new URLSearchParams(window.location.search).get('type')
+      if (requestedType === 'IN' || requestedType === 'OUT') setType(requestedType)
+      void fetchData()
+    }, 0)
     return () => window.clearTimeout(request)
   }, [])
 

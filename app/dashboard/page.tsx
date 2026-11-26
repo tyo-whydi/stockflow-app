@@ -73,14 +73,14 @@ const quickActions = [
   {
     label: 'Catat barang masuk',
     description: 'Terima stok ke gudang',
-    href: '/dashboard/transactions',
+    href: '/dashboard/transactions?type=IN',
     icon: ArrowDownToLine,
     tone: 'emerald',
   },
   {
     label: 'Catat barang keluar',
     description: 'Perbarui stok keluar',
-    href: '/dashboard/transactions',
+    href: '/dashboard/transactions?type=OUT',
     icon: ArrowUpFromLine,
     tone: 'orange',
   },

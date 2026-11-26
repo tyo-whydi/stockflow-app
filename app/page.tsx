@@ -2,14 +2,17 @@ import Link from 'next/link'
 import {
   ArrowDownToLine,
   ArrowRight,
+  ArrowRightLeft,
   ArrowUpFromLine,
-  BarChart3,
+  AlertTriangle,
   Boxes,
   Check,
   ChevronRight,
   CircleHelp,
   Clock3,
+  FileSpreadsheet,
   MapPin,
+  Menu,
   Package,
   ShieldCheck,
   Sparkles,
@@ -19,31 +22,39 @@ import {
 const features = [
   {
     icon: Package,
-    title: 'Katalog produk yang rapi',
-    description:
-      'Simpan SKU, kategori, dan batas minimum stok dalam satu katalog yang mudah dicari.',
+    title: 'Produk dan kategori',
+    description: 'Atur SKU, kategori, dan batas minimum agar katalog mudah dicari dan dirawat.',
     tone: 'bg-emerald-50 text-emerald-700',
   },
   {
-    icon: ArrowDownToLine,
-    title: 'Pergerakan tercatat',
-    description:
-      'Catat barang masuk dan keluar agar perubahan stok punya jejak yang jelas.',
-    tone: 'bg-sky-50 text-sky-700',
-  },
-  {
-    icon: MapPin,
-    title: 'Lokasi lebih terorganisir',
-    description:
-      'Ketahui barang tersimpan di gudang dan rak mana, tanpa harus menebak.',
+    icon: Warehouse,
+    title: 'Stok per lokasi',
+    description: 'Lihat jumlah stok berdasarkan gudang dan rak penyimpanannya.',
     tone: 'bg-violet-50 text-violet-700',
   },
   {
-    icon: BarChart3,
-    title: 'Laporan siap dibaca',
-    description:
-      'Pantau ringkasan operasional dan temukan stok yang perlu segera diperhatikan.',
+    icon: ArrowRightLeft,
+    title: 'Barang masuk dan keluar',
+    description: 'Catat pergerakan barang dengan jumlah, lokasi, dan petugas yang bertanggung jawab.',
+    tone: 'bg-sky-50 text-sky-700',
+  },
+  {
+    icon: AlertTriangle,
+    title: 'Peringatan stok minimum',
+    description: 'Kenali posisi stok yang perlu segera diisi ulang sebelum terlambat.',
     tone: 'bg-amber-50 text-amber-700',
+  },
+  {
+    icon: FileSpreadsheet,
+    title: 'Laporan siap diekspor',
+    description: 'Tinjau ringkasan stok dan unduh laporan untuk kebutuhan operasional.',
+    tone: 'bg-teal-50 text-teal-700',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Riwayat dan pengguna',
+    description: 'Telusuri aktivitas dan kelola akses pengguna dari satu tempat.',
+    tone: 'bg-blue-50 text-blue-700',
   },
 ]
 
@@ -79,6 +90,30 @@ export default function HomePage() {
             </Link>
           </nav>
 
+          <details className="relative md:hidden">
+            <summary
+              aria-label="Buka navigasi"
+              className="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-xl border border-slate-200 text-slate-700 transition hover:bg-slate-50"
+            >
+              <span className="sr-only">Menu</span>
+              <Menu size={18} aria-hidden="true" />
+            </summary>
+            <nav
+              aria-label="Navigasi utama"
+              className="absolute right-0 top-full z-50 mt-2 flex w-52 flex-col rounded-2xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-900/10"
+            >
+              <Link href="#fitur" className="rounded-xl px-3 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">
+                Fitur
+              </Link>
+              <Link href="#cara-kerja" className="rounded-xl px-3 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">
+                Cara kerja
+              </Link>
+              <Link href="#tentang" className="rounded-xl px-3 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">
+                Tentang
+              </Link>
+            </nav>
+          </details>
+
           <div className="flex items-center gap-2 sm:gap-3">
             <Link
               href="/login"
@@ -88,9 +123,11 @@ export default function HomePage() {
             </Link>
             <Link
               href="/login"
-              className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-emerald-700 px-4 text-[13px] font-bold text-white shadow-md shadow-emerald-900/10 transition hover:-translate-y-0.5 hover:bg-emerald-800 sm:px-5"
+              className="inline-flex min-h-11 items-center gap-1 rounded-xl bg-emerald-700 px-3 text-xs font-bold text-white shadow-md shadow-emerald-900/10 transition hover:-translate-y-0.5 hover:bg-emerald-800 sm:gap-2 sm:px-5 sm:text-[13px]"
             >
-              Mulai sekarang <ArrowRight size={15} />
+              <span className="sm:hidden">Masuk</span>
+              <span className="hidden sm:inline">Buka aplikasi</span>
+              <ArrowRight size={15} />
             </Link>
           </div>
         </div>
@@ -148,8 +185,8 @@ export default function HomePage() {
                     <p className="mt-0.5 text-[10px] font-medium text-slate-400">Data simulasi · pratinjau</p>
                   </div>
                 </div>
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1.5 text-[10px] font-bold text-emerald-700">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Siap digunakan
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1.5 text-[10px] font-bold text-slate-600">
+                  Pratinjau UI
                 </span>
               </div>
 
@@ -180,7 +217,11 @@ export default function HomePage() {
                   </div>
                   <span className="rounded-lg bg-slate-50 px-2.5 py-1.5 text-[10px] font-semibold text-slate-500">7 hari terakhir</span>
                 </div>
-                <div className="flex h-[112px] items-end justify-between gap-2 border-b border-l border-slate-100 px-2 pb-0">
+                <div
+                  role="img"
+                  aria-label="Contoh grafik aktivitas stok selama tujuh hari, menampilkan barang masuk dan keluar."
+                  className="flex h-[112px] items-end justify-between gap-2 border-b border-l border-slate-100 px-2 pb-0"
+                >
                   {[48, 69, 54, 82, 63, 94, 72, 58, 86, 68, 96, 76].map((height, index) => (
                     <div key={index} className="flex h-full flex-1 items-end justify-center gap-1">
                       <span className="w-full max-w-[11px] rounded-t-sm bg-emerald-500/80" style={{ height: `${height}%` }} />
@@ -238,7 +279,7 @@ export default function HomePage() {
             </p>
           </div>
 
-          <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:mt-16 lg:grid-cols-4">
+          <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:mt-16 lg:grid-cols-3">
             {features.map((feature) => {
               const Icon = feature.icon
               return (
