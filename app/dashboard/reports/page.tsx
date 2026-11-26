@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useCompanyContext } from '@/lib/company-context'
 import { FileText, Download, Printer, Search, X, RefreshCw } from 'lucide-react'
 import * as XLSX from 'xlsx'
 
@@ -17,6 +18,7 @@ function firstRelated<T>(relationship: T | T[] | null | undefined): T | undefine
 }
 
 export default function ReportsPage() {
+  const { activeCompanyId } = useCompanyContext()
   const [stocks, setStocks] = useState<StockReport[]>([])
   const [fetching, setFetching] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
@@ -28,6 +30,7 @@ export default function ReportsPage() {
     const { data, error } = await supabase
       .from('stocks')
       .select('id, current_stock, products ( sku, min_stock ), locations ( code )')
+      .eq('company_id', activeCompanyId)
       .order('current_stock', { ascending: true })
     if (error) {
       console.error('Gagal memuat laporan stok:', error.message)
@@ -42,7 +45,7 @@ export default function ReportsPage() {
   useEffect(() => {
     const request = window.setTimeout(() => void fetchStocks(), 0)
     return () => window.clearTimeout(request)
-  }, [])
+  }, [activeCompanyId])
 
   const filteredStocks = useMemo(() => {
     return stocks.filter(s => {

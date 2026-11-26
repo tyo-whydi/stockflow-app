@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useCompanyContext } from '@/lib/company-context'
 import { ArrowRightLeft, Plus, Pencil, X, Check, Search, Download, RefreshCw } from 'lucide-react'
 
 type Product = { id: number, sku: string }
@@ -34,6 +35,7 @@ function firstRelated<T>(relationship: T | T[] | null | undefined): T | undefine
 const TABLE_HEADERS = ['Tanggal', 'Tipe', 'SKU', 'Rak', 'Qty', 'Petugas', 'Catatan', 'Aksi']
 
 export default function TransactionsPage() {
+  const { activeCompanyId, activeCompanyRole } = useCompanyContext()
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [locations, setLocations] = useState<Location[]>([])
@@ -64,8 +66,8 @@ export default function TransactionsPage() {
     setFetching(true)
 
     // Ambil produk & lokasi untuk dropdown
-    const { data: prodData } = await supabase.from('products').select('id, sku').order('sku')
-    const { data: locData } = await supabase.from('locations').select('id, code').order('code')
+    const { data: prodData } = await supabase.from('products').select('id, sku').eq('company_id', activeCompanyId).order('sku')
+    const { data: locData } = await supabase.from('locations').select('id, code').eq('company_id', activeCompanyId).order('code')
     if (prodData) setProducts(prodData)
     if (locData) setLocations(locData)
 
@@ -73,6 +75,7 @@ export default function TransactionsPage() {
     const { data: trxData, error } = await supabase
       .from('transactions')
       .select('id, type, quantity, transaction_date, notes, product_id, location_id, user_id, products ( sku ), locations ( code )')
+      .eq('company_id', activeCompanyId)
       .order('transaction_date', { ascending: false })
       .limit(100)
 
@@ -84,9 +87,17 @@ export default function TransactionsPage() {
     }
 
     const transactionRows = (trxData ?? []) as TransactionRecord[]
-    const { data: profilesData, error: profilesError } = await supabase
+    const memberIds = Array.from(new Set(
+      transactionRows
+        .map((transaction) => transaction.user_id)
+        .filter((userId): userId is string => Boolean(userId)),
+    ))
+    const { data: profilesData, error: profilesError } = memberIds.length > 0
+      ? await supabase
       .from('profiles')
       .select('id, full_name, email')
+      .in('id', memberIds)
+      : { data: [], error: null }
     if (profilesError) console.error('Error fetching profiles:', profilesError.message)
     const profileRows = (profilesData ?? []) as TransactionProfile[]
 
@@ -114,7 +125,7 @@ export default function TransactionsPage() {
       void fetchData()
     }, 0)
     return () => window.clearTimeout(request)
-  }, [])
+  }, [activeCompanyId])
 
   // Simpan transaksi baru
   const handleSubmit = async (e: React.FormEvent) => {
@@ -133,10 +144,11 @@ export default function TransactionsPage() {
         return
       }
 
-      if (type === 'OUT') {
+      if (type === 'OUT' && activeCompanyRole !== 'staff') {
         const { data: stock, error: stockError } = await supabase
           .from('stocks')
           .select('current_stock')
+          .eq('company_id', activeCompanyId)
           .eq('product_id', Number(productId))
           .eq('location_id', Number(locationId))
           .maybeSingle()
@@ -152,6 +164,7 @@ export default function TransactionsPage() {
       }
 
       const { error } = await supabase.from('transactions').insert([{
+        company_id: activeCompanyId,
         product_id: Number(productId),
         location_id: Number(locationId),
         user_id: user.id,
@@ -162,7 +175,9 @@ export default function TransactionsPage() {
 
       if (error) {
         console.error('Gagal menyimpan transaksi:', error.message)
-        setErrorMessage('Transaksi gagal disimpan. Periksa kembali stok dan data yang dipilih.')
+        setErrorMessage(error.code === '23514'
+          ? 'Stok di lokasi ini tidak cukup untuk transaksi keluar.'
+          : 'Transaksi gagal disimpan. Periksa kembali data yang dipilih.')
       } else {
         setQuantity('')
         setNotes('')
@@ -193,15 +208,8 @@ export default function TransactionsPage() {
     setEditLocationId('')
   }
 
-  // Recreate edited rows so existing database inventory triggers still run.
   const saveEdit = async () => {
     if (!editingId) return
-    const original = transactions.find((transaction) => transaction.id === editingId)
-    if (!original) {
-      setErrorMessage('Transaksi yang akan diedit tidak ditemukan. Muat ulang data.')
-      return
-    }
-
     const parsedQuantity = Number(editQty)
     if (!editProductId || !editLocationId || !Number.isInteger(parsedQuantity) || parsedQuantity < 1) {
       setErrorMessage('Pilih produk, lokasi, dan jumlah minimal 1 unit.')
@@ -209,53 +217,23 @@ export default function TransactionsPage() {
     }
     if (!confirm('Simpan perubahan? Stok akan otomatis disesuaikan.')) return
 
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      setErrorMessage('Sesi login habis. Silakan login ulang.')
-      return
-    }
+    const { data: updated, error } = await supabase.rpc('replace_company_transaction', {
+      p_transaction_id: editingId,
+      p_product_id: Number(editProductId),
+      p_location_id: Number(editLocationId),
+      p_type: editType,
+      p_quantity: parsedQuantity,
+      p_notes: editNotes,
+    })
 
-    // 1. Hapus transaksi lama (trigger akan reverse stok)
-    const { error: delErr } = await supabase
-      .from('transactions')
-      .delete()
-      .eq('id', editingId)
-
-    if (delErr) {
-      console.error('Gagal membatalkan transaksi lama:', delErr.message)
-      setErrorMessage('Perubahan gagal disimpan. Transaksi lama tetap dipertahankan.')
-      return
-    }
-
-    // 2. Insert transaksi baru dengan data yang diedit
-    const { error: insErr } = await supabase.from('transactions').insert([{
-      product_id: parseInt(editProductId),
-      location_id: parseInt(editLocationId),
-      user_id: user.id,
-      type: editType,
-      quantity: parsedQuantity,
-      notes: editNotes,
-      transaction_date: new Date().toISOString()
-    }])
-
-    if (insErr) {
-      console.error('Gagal menyimpan transaksi hasil edit:', insErr.message)
-      const { error: restoreError } = await supabase.from('transactions').insert([{
-        product_id: original.product_id,
-        location_id: original.location_id,
-        user_id: original.user_id,
-        type: original.type,
-        quantity: original.quantity,
-        notes: original.notes,
-        transaction_date: original.transaction_date,
-      }])
-      if (restoreError) {
-        console.error('Gagal memulihkan transaksi awal:', restoreError.message)
-        setErrorMessage('Transaksi gagal diedit dan pemulihan otomatis gagal. Segera periksa stok dan catat ulang transaksi.')
-      } else {
-        setErrorMessage('Perubahan gagal disimpan. Transaksi awal sudah dipulihkan.')
-        await fetchData()
-      }
+    if (error) {
+      console.error('Gagal memperbarui transaksi:', error.message)
+      setErrorMessage(error.code === '23514'
+        ? 'Perubahan stok ditolak karena jumlah barang tidak mencukupi.'
+        : 'Perubahan gagal disimpan. Transaksi lama tetap dipertahankan.')
+    } else if (!updated) {
+      cancelEdit()
+      setErrorMessage('Transaksi tidak ditemukan atau sudah berubah. Muat ulang data.')
     } else {
       cancelEdit()
       setErrorMessage('')
@@ -324,7 +302,7 @@ export default function TransactionsPage() {
       )}
 
       {/* Form Input Transaksi */}
-      <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm mb-8">
+      {activeCompanyRole !== 'manager' && <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm mb-8">
         <h2 className="text-lg font-bold text-slate-900 mb-5">Input Transaksi Baru</h2>
         <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
           <div className="md:col-span-2">
@@ -405,7 +383,7 @@ export default function TransactionsPage() {
             />
           </div>
         </form>
-      </div>
+      </div>}
 
       {/* Tabel Riwayat Transaksi */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -490,7 +468,7 @@ export default function TransactionsPage() {
                     </td>
 
                     <td className="px-6 py-4">
-                      {editingId === trx.id ? (
+                      {activeCompanyRole !== 'admin' ? <span className="text-slate-300">—</span> : editingId === trx.id ? (
                         <select
                           value={editType}
                           onChange={(e) => setEditType(e.target.value as 'IN' | 'OUT')}

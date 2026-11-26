@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useCompanyContext } from '@/lib/company-context'
 import { Package, Plus, Pencil, Trash2, X, Check, Search, AlertTriangle, TrendingUp, RefreshCw, Filter } from 'lucide-react'
 
 type Category = { id: number, name: string }
@@ -26,6 +27,7 @@ type TransactionRecord = { product_id: number }
 type StockFilter = 'ALL' | 'SAFE' | 'LOW' | 'EMPTY'
 
 export default function ProductsPage() {
+  const { activeCompanyId, activeCompanyRole } = useCompanyContext()
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [categoryId, setCategoryId] = useState('')
@@ -46,13 +48,14 @@ export default function ProductsPage() {
 
     try {
       const [categoryResult, productResult, stockResult, transactionResult] = await Promise.all([
-        supabase.from('categories').select('id, name').order('name'),
+        supabase.from('categories').select('id, name').eq('company_id', activeCompanyId).order('name'),
         supabase
           .from('products')
           .select('id, sku, size, color, min_stock, category_id, categories ( name )')
+          .eq('company_id', activeCompanyId)
           .order('sku', { ascending: true }),
-        supabase.from('stocks').select('product_id, location_id, current_stock'),
-        supabase.from('transactions').select('product_id'),
+        supabase.from('stocks').select('product_id, location_id, current_stock').eq('company_id', activeCompanyId),
+        supabase.from('transactions').select('product_id').eq('company_id', activeCompanyId),
       ])
       const failedResult = [categoryResult, productResult, stockResult, transactionResult]
         .find((result) => result.error)
@@ -96,7 +99,7 @@ export default function ProductsPage() {
   useEffect(() => {
     const request = window.setTimeout(() => void fetchData(), 0)
     return () => window.clearTimeout(request)
-  }, [])
+  }, [activeCompanyId])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -118,6 +121,7 @@ export default function ProductsPage() {
 
     try {
       const { error } = await supabase.from('products').insert([{
+        company_id: activeCompanyId,
         sku: generatedSku,
         category_id: Number(categoryId),
         size: size.trim().toUpperCase(),
@@ -142,7 +146,7 @@ export default function ProductsPage() {
     const product = products.find((item) => item.id === id)
     if (!product || product.total_stock > 0 || product.transaction_count > 0) return
     if (!confirm(`Hapus produk "${sku}"?`)) return
-    const { error } = await supabase.from('products').delete().eq('id', id)
+    const { error } = await supabase.from('products').delete().eq('id', id).eq('company_id', activeCompanyId)
     if (error) {
       console.error('Gagal menghapus produk:', error.message)
       setErrorMessage('Produk tidak dapat dihapus. Periksa apakah masih memiliki riwayat.')
@@ -164,6 +168,7 @@ export default function ProductsPage() {
       .from('products')
       .update({ min_stock: parsedMinStock })
       .eq('id', editingId)
+      .eq('company_id', activeCompanyId)
     if (error) {
       console.error('Gagal memperbarui produk:', error.message)
       setErrorMessage('Batas stok gagal diperbarui.')
@@ -248,7 +253,7 @@ export default function ProductsPage() {
       </div>
 
       {/* Form Tambah */}
-      <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm mb-8">
+      {activeCompanyRole === 'admin' && <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm mb-8">
         <h2 className="text-lg font-bold text-slate-900 mb-5">Tambah Varian Baru</h2>
         <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
           <div className="md:col-span-3">
@@ -282,7 +287,7 @@ export default function ProductsPage() {
             </button>
           </div>
         </form>
-      </div>
+      </div>}
 
       {/* Search Bar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm mb-4">
@@ -392,7 +397,7 @@ export default function ProductsPage() {
                         )}
                       </td>
                       <td className="px-6 py-4 text-right">
-                        {editingId === prod.id ? (
+                        {activeCompanyRole !== 'admin' ? <span className="text-slate-300">—</span> : editingId === prod.id ? (
                           <div className="flex items-center justify-end gap-2">
                             <button onClick={saveEdit} aria-label="Simpan batas stok" className="p-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded-lg transition"><Check size={16} /></button>
                             <button onClick={cancelEdit} aria-label="Batalkan edit" className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition"><X size={16} /></button>

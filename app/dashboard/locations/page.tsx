@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useCompanyContext } from '@/lib/company-context'
 import { MapPin, Plus, Pencil, Trash2, X, Check, Search, Boxes, Package, RefreshCw } from 'lucide-react'
 
 type Location = { id: number, code: string, description: string, skuCount: number, totalUnits: number, transactionCount: number }
@@ -10,6 +11,7 @@ type StockRecord = { location_id: number; current_stock: number }
 type TransactionRecord = { location_id: number }
 
 export default function LocationsPage() {
+  const { activeCompanyId, activeCompanyRole } = useCompanyContext()
   const [locations, setLocations] = useState<Location[]>([])
   const [code, setCode] = useState('')
   const [description, setDescription] = useState('')
@@ -25,9 +27,9 @@ export default function LocationsPage() {
   const fetchLocations = async () => {
     setFetching(true)
     const [locationResult, stockResult, transactionResult] = await Promise.all([
-      supabase.from('locations').select('id, code, description').order('code', { ascending: true }),
-      supabase.from('stocks').select('location_id, current_stock'),
-      supabase.from('transactions').select('location_id'),
+      supabase.from('locations').select('id, code, description').eq('company_id', activeCompanyId).order('code', { ascending: true }),
+      supabase.from('stocks').select('location_id, current_stock').eq('company_id', activeCompanyId),
+      supabase.from('transactions').select('location_id').eq('company_id', activeCompanyId),
     ])
     const failedResult = [locationResult, stockResult, transactionResult].find((result) => result.error)
     if (failedResult?.error) {
@@ -59,7 +61,7 @@ export default function LocationsPage() {
   useEffect(() => {
     const request = window.setTimeout(() => void fetchLocations(), 0)
     return () => window.clearTimeout(request)
-  }, [])
+  }, [activeCompanyId])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -67,6 +69,7 @@ export default function LocationsPage() {
     setLoading(true)
     try {
       const { error } = await supabase.from('locations').insert([{
+        company_id: activeCompanyId,
         code: code.trim().toUpperCase(),
         description: description.trim(),
       }])
@@ -87,7 +90,7 @@ export default function LocationsPage() {
     const location = locations.find((item) => item.id === id)
     if (!location || location.skuCount > 0 || location.transactionCount > 0) return
     if (!confirm(`Hapus rak "${location.code}"?`)) return
-    const { error } = await supabase.from('locations').delete().eq('id', id)
+    const { error } = await supabase.from('locations').delete().eq('id', id).eq('company_id', activeCompanyId)
     if (error) {
       console.error('Gagal menghapus lokasi:', error.message)
       setErrorMessage('Rak tidak dapat dihapus. Periksa apakah rak masih digunakan.')
@@ -107,6 +110,7 @@ export default function LocationsPage() {
       .from('locations')
       .update({ code: editCode.trim().toUpperCase(), description: editDescription.trim() })
       .eq('id', editingId)
+      .eq('company_id', activeCompanyId)
     if (error) {
       console.error('Gagal memperbarui lokasi:', error.message)
       setErrorMessage('Rak gagal diperbarui. Pastikan kode rak belum digunakan.')
@@ -158,7 +162,7 @@ export default function LocationsPage() {
         </div>
       </div>
 
-      <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm mb-8">
+      {activeCompanyRole === 'admin' && <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm mb-8">
         <h2 className="text-lg font-bold text-slate-900 mb-5">Tambah Rak Baru</h2>
         <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
           <div className="md:col-span-4">
@@ -193,7 +197,7 @@ export default function LocationsPage() {
             </button>
           </div>
         </form>
-      </div>
+      </div>}
 
       <div className="relative mb-4">
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
@@ -262,10 +266,12 @@ export default function LocationsPage() {
                         </div>
                       </td>
                       <td className="px-8 py-5 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => startEdit(loc)} aria-label={`Edit ${loc.code}`} className="p-2 bg-slate-100 hover:bg-emerald-100 text-slate-600 hover:text-emerald-700 rounded-lg transition"><Pencil size={16} /></button>
-                          <button onClick={() => void handleDelete(loc.id)} disabled={loc.skuCount > 0 || loc.transactionCount > 0} title={loc.skuCount > 0 || loc.transactionCount > 0 ? 'Rak masih memiliki stok atau riwayat transaksi' : 'Hapus rak'} aria-label={`Hapus ${loc.code}`} className="p-2 bg-slate-100 hover:bg-red-100 text-slate-600 hover:text-red-700 rounded-lg transition disabled:cursor-not-allowed disabled:opacity-40"><Trash2 size={16} /></button>
-                        </div>
+                        {activeCompanyRole === 'admin' ? (
+                          <div className="flex items-center justify-end gap-2">
+                            <button onClick={() => startEdit(loc)} aria-label={`Edit ${loc.code}`} className="p-2 bg-slate-100 hover:bg-emerald-100 text-slate-600 hover:text-emerald-700 rounded-lg transition"><Pencil size={16} /></button>
+                            <button onClick={() => void handleDelete(loc.id)} disabled={loc.skuCount > 0 || loc.transactionCount > 0} title={loc.skuCount > 0 || loc.transactionCount > 0 ? 'Rak masih memiliki stok atau riwayat transaksi' : 'Hapus rak'} aria-label={`Hapus ${loc.code}`} className="p-2 bg-slate-100 hover:bg-red-100 text-slate-600 hover:text-red-700 rounded-lg transition disabled:cursor-not-allowed disabled:opacity-40"><Trash2 size={16} /></button>
+                          </div>
+                        ) : <span className="text-slate-300">—</span>}
                       </td>
                     </>
                   )}

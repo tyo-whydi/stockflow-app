@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import { useCompanyContext } from '@/lib/company-context'
 import {
   Activity,
   AlertTriangle,
@@ -112,6 +113,7 @@ function firstRelated<T>(relationship: T | T[] | null | undefined): T | undefine
 }
 
 export default function DashboardPage() {
+  const { activeCompanyId } = useCompanyContext()
   const [stats, setStats] = useState(initialStats)
   const [chartData, setChartData] = useState<ChartData[]>([])
   const [lowStockRows, setLowStockRows] = useState<StockRow[]>([])
@@ -130,19 +132,22 @@ export default function DashboardPage() {
 
     try {
       const [productResult, stockResult, activityResult, recentResult] = await Promise.all([
-        supabase.from('products').select('id', { count: 'exact', head: true }),
+        supabase.from('products').select('id', { count: 'exact', head: true }).eq('company_id', activeCompanyId),
         supabase
           .from('stocks')
-          .select('current_stock, products ( sku, min_stock ), locations ( code )'),
+          .select('current_stock, products ( sku, min_stock ), locations ( code )')
+          .eq('company_id', activeCompanyId),
         supabase
           .from('transactions')
           .select('type, quantity, transaction_date')
+          .eq('company_id', activeCompanyId)
           .gte('transaction_date', startWeek.toISOString())
           .lt('transaction_date', endToday.toISOString())
           .order('transaction_date', { ascending: true }),
         supabase
           .from('transactions')
           .select('id, type, quantity, transaction_date, notes, products ( sku ), locations ( code )')
+          .eq('company_id', activeCompanyId)
           .order('transaction_date', { ascending: false })
           .limit(6),
       ])
@@ -216,7 +221,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [activeCompanyId])
 
   useEffect(() => {
     const request = window.setTimeout(() => void fetchDashboard(), 0)

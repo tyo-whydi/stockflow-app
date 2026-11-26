@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useCompanyContext } from '@/lib/company-context'
 import { Warehouse, Search, Filter, X, TrendingUp, AlertTriangle, Package, Boxes } from 'lucide-react'
 
 type StockRow = {
@@ -35,6 +36,7 @@ function firstRelated<T>(relationship: T | T[] | null | undefined): T | undefine
 }
 
 export default function StockPage() {
+  const { activeCompanyId } = useCompanyContext()
   const [stocks, setStocks] = useState<StockRow[]>([])
   const [catalog, setCatalog] = useState<CatalogProduct[]>([])
   const [fetching, setFetching] = useState(true)
@@ -50,8 +52,9 @@ export default function StockPage() {
         products ( sku, min_stock, categories ( name ) ),
         locations ( code )
       `)
+        .eq('company_id', activeCompanyId)
         .order('current_stock', { ascending: false }),
-      supabase.from('products').select('id, sku, min_stock, categories ( name )').order('sku'),
+      supabase.from('products').select('id, sku, min_stock, categories ( name )').eq('company_id', activeCompanyId).order('sku'),
     ])
 
     if (stockResult.error || productResult.error) {
@@ -83,7 +86,7 @@ export default function StockPage() {
   useEffect(() => {
     const request = window.setTimeout(() => void fetchStocks(), 0)
     return () => window.clearTimeout(request)
-  }, [])
+  }, [activeCompanyId])
 
   const totalByProduct = useMemo(() => {
     const totals = new Map<number, number>()

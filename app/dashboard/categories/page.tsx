@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useCompanyContext } from '@/lib/company-context'
 import { Tags, Plus, Pencil, Trash2, X, Check, Search, Package, RefreshCw } from 'lucide-react'
 
 type Category = { id: number, name: string, description: string, productCount: number }
@@ -9,6 +10,7 @@ type CategoryRecord = Omit<Category, 'productCount'>
 type ProductCategory = { category_id: number }
 
 export default function CategoriesPage() {
+  const { activeCompanyId, activeCompanyRole } = useCompanyContext()
   const [categories, setCategories] = useState<Category[]>([])
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -24,8 +26,8 @@ export default function CategoriesPage() {
   const fetchCategories = async () => {
     setFetching(true)
     const [categoryResult, productResult] = await Promise.all([
-      supabase.from('categories').select('id, name, description').order('name', { ascending: true }),
-      supabase.from('products').select('category_id'),
+      supabase.from('categories').select('id, name, description').eq('company_id', activeCompanyId).order('name', { ascending: true }),
+      supabase.from('products').select('category_id').eq('company_id', activeCompanyId),
     ])
     if (categoryResult.error || productResult.error) {
       const error = categoryResult.error ?? productResult.error
@@ -48,7 +50,7 @@ export default function CategoriesPage() {
   useEffect(() => {
     const request = window.setTimeout(() => void fetchCategories(), 0)
     return () => window.clearTimeout(request)
-  }, [])
+  }, [activeCompanyId])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -56,6 +58,7 @@ export default function CategoriesPage() {
     setLoading(true)
     try {
       const { error } = await supabase.from('categories').insert([{
+        company_id: activeCompanyId,
         name: name.trim().toUpperCase(),
         description: description.trim(),
       }])
@@ -76,7 +79,7 @@ export default function CategoriesPage() {
     const category = categories.find((item) => item.id === id)
     if (!category || category.productCount > 0) return
     if (!confirm(`Hapus kategori "${category.name}"?`)) return
-    const { error } = await supabase.from('categories').delete().eq('id', id)
+    const { error } = await supabase.from('categories').delete().eq('id', id).eq('company_id', activeCompanyId)
     if (error) {
       console.error('Gagal menghapus kategori:', error.message)
       setErrorMessage('Kategori tidak dapat dihapus. Periksa apakah masih digunakan.')
@@ -98,6 +101,7 @@ export default function CategoriesPage() {
       .from('categories')
       .update({ name: editName.trim().toUpperCase(), description: editDescription.trim() })
       .eq('id', editingId)
+      .eq('company_id', activeCompanyId)
     if (error) {
       console.error('Gagal memperbarui kategori:', error.message)
       setErrorMessage('Kategori gagal diperbarui. Pastikan nama belum digunakan.')
@@ -143,7 +147,7 @@ export default function CategoriesPage() {
         </div>
       </div>
 
-      <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm mb-8">
+      {activeCompanyRole === 'admin' && <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm mb-8">
         <h2 className="text-lg font-bold text-slate-900 mb-5">Tambah Kategori Baru</h2>
         <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
           <div className="md:col-span-4">
@@ -178,7 +182,7 @@ export default function CategoriesPage() {
             </button>
           </div>
         </form>
-      </div>
+      </div>}
 
       <div className="relative mb-4">
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
@@ -256,14 +260,16 @@ export default function CategoriesPage() {
                         </span>
                       </td>
                       <td className="px-8 py-5 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => startEdit(cat)} aria-label={`Edit ${cat.name}`} className="p-2 bg-slate-100 hover:bg-emerald-100 text-slate-600 hover:text-emerald-700 rounded-lg transition">
-                            <Pencil size={16} />
-                          </button>
-                          <button onClick={() => void handleDelete(cat.id)} disabled={cat.productCount > 0} title={cat.productCount > 0 ? 'Kategori masih digunakan produk' : 'Hapus kategori'} aria-label={`Hapus ${cat.name}`} className="p-2 bg-slate-100 hover:bg-red-100 text-slate-600 hover:text-red-700 rounded-lg transition disabled:cursor-not-allowed disabled:opacity-40">
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
+                        {activeCompanyRole === 'admin' ? (
+                          <div className="flex items-center justify-end gap-2">
+                            <button onClick={() => startEdit(cat)} aria-label={`Edit ${cat.name}`} className="p-2 bg-slate-100 hover:bg-emerald-100 text-slate-600 hover:text-emerald-700 rounded-lg transition">
+                              <Pencil size={16} />
+                            </button>
+                            <button onClick={() => void handleDelete(cat.id)} disabled={cat.productCount > 0} title={cat.productCount > 0 ? 'Kategori masih digunakan produk' : 'Hapus kategori'} aria-label={`Hapus ${cat.name}`} className="p-2 bg-slate-100 hover:bg-red-100 text-slate-600 hover:text-red-700 rounded-lg transition disabled:cursor-not-allowed disabled:opacity-40">
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        ) : <span className="text-slate-300">—</span>}
                       </td>
                     </>
                   )}

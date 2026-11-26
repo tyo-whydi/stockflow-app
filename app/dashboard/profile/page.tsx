@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useCompanyContext } from '@/lib/company-context'
 import { User, Lock, Save, Shield, ShieldCheck } from 'lucide-react'
 
 export default function ProfilePage() {
+  const { activeCompanyRole } = useCompanyContext()
   const [email, setEmail] = useState('')
   const [fullName, setFullName] = useState('')
-  const [role, setRole] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [loadingProfile, setLoadingProfile] = useState(false)
@@ -29,12 +30,11 @@ export default function ProfilePage() {
           setEmail(user.email || '')
           const { data: profile, error: profileError } = await supabase
             .from('profiles')
-            .select('full_name, role')
+            .select('full_name')
             .eq('id', user.id)
             .single()
           if (profileError) throw profileError
           setFullName(profile.full_name || '')
-          setRole(profile.role || 'staff')
         } catch (profileError) {
           console.error('Gagal memuat profil:', profileError)
           setError('Profil belum dapat dimuat. Coba muat ulang halaman.')
@@ -144,7 +144,7 @@ export default function ProfilePage() {
           </div>
           <div className="ml-auto flex items-center gap-2 rounded-full border border-purple-100 bg-purple-50 px-3 py-2">
             <Shield size={16} className="text-purple-600" />
-            <span className="text-xs font-bold text-purple-700 capitalize">{role || 'staff'}</span>
+            <span className="text-xs font-bold text-purple-700 capitalize">{activeCompanyRole}</span>
           </div>
         </div>
 

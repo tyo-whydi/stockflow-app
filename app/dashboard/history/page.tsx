@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useCompanyContext } from '@/lib/company-context'
 import { History, Search, X, Plus, Pencil, Trash2, User, Clock, Filter, Download, RefreshCw } from 'lucide-react'
 
 type AuditLog = {
   id: number
-  user_id: string
+  user_id: string | null
   table_name: string
   record_id: string
   action: 'INSERT' | 'UPDATE' | 'DELETE'
@@ -27,6 +28,7 @@ const TABLE_LABELS: Record<string, string> = {
 }
 
 export default function HistoryPage() {
+  const { activeCompanyId } = useCompanyContext()
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [fetching, setFetching] = useState(true)
@@ -38,14 +40,31 @@ export default function HistoryPage() {
   const fetchData = async () => {
     setFetching(true)
     try {
-      const [logsResult, profilesResult] = await Promise.all([
-        supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(500),
-        supabase.from('profiles').select('id, full_name, email'),
+      const [logsResult, membershipsResult] = await Promise.all([
+        supabase
+          .from('audit_logs')
+          .select('*')
+          .eq('company_id', activeCompanyId)
+          .order('created_at', { ascending: false })
+          .limit(500),
+        supabase
+          .from('company_memberships')
+          .select('user_id')
+          .eq('company_id', activeCompanyId),
       ])
-      if (logsResult.error || profilesResult.error) {
-        const error = logsResult.error ?? profilesResult.error
+      if (logsResult.error || membershipsResult.error) {
+        const error = logsResult.error ?? membershipsResult.error
         console.error('Gagal memuat histori aktivitas:', error?.message)
         setErrorMessage('Histori belum dapat dimuat. Periksa koneksi lalu coba lagi.')
+        return
+      }
+      const memberIds = (membershipsResult.data ?? []).map((membership) => membership.user_id)
+      const profilesResult = memberIds.length > 0
+        ? await supabase.from('profiles').select('id, full_name, email').in('id', memberIds)
+        : { data: [], error: null }
+      if (profilesResult.error) {
+        console.error('Gagal memuat profil anggota:', profilesResult.error.message)
+        setErrorMessage('Nama petugas belum dapat dimuat. Periksa koneksi lalu coba lagi.')
         return
       }
       if (logsResult.data) setLogs(logsResult.data as AuditLog[])
@@ -59,9 +78,9 @@ export default function HistoryPage() {
   useEffect(() => {
     const request = window.setTimeout(() => void fetchData(), 0)
     return () => window.clearTimeout(request)
-  }, [])
+  }, [activeCompanyId])
 
-  const getUserName = useCallback((userId: string) => {
+  const getUserName = useCallback((userId: string | null) => {
     const profile = profiles.find(p => p.id === userId)
     return profile?.full_name || profile?.email?.split('@')[0] || 'System'
   }, [profiles])
