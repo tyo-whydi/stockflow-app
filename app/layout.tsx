@@ -5,8 +5,8 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'], display: 'swap' })
 
 export const metadata: Metadata = {
-  title: 'StockFlow — Sistem Manajemen Inventory',
-  description: 'Sistem inventory modern untuk gudang.',
+  title: 'StockFlow — Inventaris Lebih Rapi, Bisnis Lebih Siap',
+  description: 'Kelola produk, stok, transaksi, lokasi gudang, dan laporan inventaris dari satu tempat dengan StockFlow.',
 }
 
 export const viewport: Viewport = {
