@@ -104,7 +104,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
-        router.replace('/login')
+        router.replace('/')
       }
     })
 
@@ -138,7 +138,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
-    router.replace('/login')
+    router.replace('/')
   }
 
   const handleCreateCompany = async (event: React.FormEvent) => {
