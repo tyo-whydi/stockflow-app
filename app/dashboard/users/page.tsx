@@ -13,6 +13,10 @@ type CompanyUser = {
 }
 type UserRole = CompanyUser['role']
 
+function isMemberApiResult(value: unknown): value is { error?: unknown; status?: unknown } {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 export default function UsersPage() {
   const { activeCompanyId, activeCompanyName, activeCompanyRole, updateCompanyName } = useCompanyContext()
   const [users, setUsers] = useState<CompanyUser[]>([])
@@ -22,7 +26,9 @@ export default function UsersPage() {
   const [roleFilter, setRoleFilter] = useState<'ALL' | UserRole>('ALL')
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState('')
+  const [successMessage, setSuccessMessage] = useState('')
   const [memberEmail, setMemberEmail] = useState('')
+  const [memberFullName, setMemberFullName] = useState('')
   const [memberRole, setMemberRole] = useState<UserRole>('staff')
   const [companyDraft, setCompanyDraft] = useState({ id: activeCompanyId, name: activeCompanyName })
   const [savingCompany, setSavingCompany] = useState(false)
@@ -111,22 +117,58 @@ export default function UsersPage() {
   const handleAddMember = async (event: React.FormEvent) => {
     event.preventDefault()
     const email = memberEmail.trim().toLowerCase()
-    if (!email) return
+    if (!email || updatingUserId) return
     setUpdatingUserId(email)
     setErrorMessage('')
-    const { error } = await supabase.rpc('add_company_member', {
-      p_company_id: activeCompanyId,
-      p_email: email,
-      p_role: memberRole,
-    })
-    if (error) {
-      console.error('Gagal menambahkan anggota perusahaan:', error.message)
-      setErrorMessage('Anggota gagal ditambahkan. Email harus memiliki akun StockFlow terlebih dahulu.')
-    } else {
+    setSuccessMessage('')
+
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError) {
+        console.error('Gagal memeriksa sesi saat menambahkan anggota:', sessionError.message)
+        setErrorMessage('Sesi login belum dapat diverifikasi. Silakan masuk kembali.')
+        return
+      }
+      if (!session) {
+        setErrorMessage('Sesi login tidak ditemukan. Silakan masuk kembali.')
+        return
+      }
+
+      const response = await fetch('/api/company-members', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          companyId: activeCompanyId,
+          email,
+          fullName: memberFullName.trim(),
+          role: memberRole,
+        }),
+      })
+      const result: unknown = await response.json().catch(() => null)
+      const resultRecord = isMemberApiResult(result) ? result : null
+      if (!response.ok) {
+        const message = typeof resultRecord?.error === 'string'
+          ? resultRecord.error
+          : 'Anggota gagal ditambahkan. Coba lagi.'
+        setErrorMessage(message)
+        return
+      }
+
       setMemberEmail('')
+      setMemberFullName('')
+      setSuccessMessage(resultRecord?.status === 'invited'
+        ? `Undangan untuk ${email} berhasil dikirim. Anggota dapat mengatur password melalui email.`
+        : `${email} berhasil ditambahkan ke perusahaan.`)
       await fetchUsers()
+    } catch (requestError) {
+      console.error('Gagal menambahkan anggota perusahaan:', requestError)
+      setErrorMessage('Anggota gagal ditambahkan. Periksa koneksi lalu coba lagi.')
+    } finally {
+      setUpdatingUserId(null)
     }
-    setUpdatingUserId(null)
   }
 
   const handleRemoveMember = async (userId: string) => {
@@ -212,6 +254,11 @@ export default function UsersPage() {
           </button>
         </div>
       )}
+      {successMessage && (
+        <p role="status" className="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {successMessage}
+        </p>
+      )}
 
       <div className="mb-6 grid gap-4 xl:grid-cols-2">
         <form onSubmit={handleRenameCompany} className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
@@ -242,11 +289,11 @@ export default function UsersPage() {
           <div className="mb-4 flex items-center gap-3">
             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-700"><UserRoundPlus size={19} /></span>
             <div>
-              <h2 className="font-bold text-slate-900">Tambahkan anggota</h2>
-              <p className="text-xs text-slate-500">Akun harus sudah terdaftar di StockFlow.</p>
+              <h2 className="font-bold text-slate-900">Tambah atau buat akun anggota</h2>
+              <p className="text-xs text-slate-500">Akun baru menerima email untuk mengatur password.</p>
             </div>
           </div>
-          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_150px_auto]">
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_150px_auto]">
             <input
               type="email"
               value={memberEmail}
@@ -254,6 +301,15 @@ export default function UsersPage() {
               placeholder="nama@perusahaan.com"
               aria-label="Email anggota"
               required
+              className="min-w-0 rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-emerald-500"
+            />
+            <input
+              type="text"
+              value={memberFullName}
+              onChange={(event) => setMemberFullName(event.target.value)}
+              placeholder="Nama lengkap (opsional)"
+              aria-label="Nama lengkap anggota"
+              maxLength={100}
               className="min-w-0 rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-emerald-500"
             />
             <select value={memberRole} onChange={(event) => {
@@ -264,8 +320,8 @@ export default function UsersPage() {
               <option value="manager">Manager</option>
               <option value="admin">Admin</option>
             </select>
-            <button type="submit" disabled={updatingUserId === memberEmail.trim().toLowerCase()} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50">
-              <UserRoundPlus size={16} /> Tambah
+            <button type="submit" disabled={Boolean(updatingUserId)} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50">
+              <UserRoundPlus size={16} /> {updatingUserId ? 'Memproses...' : 'Tambah'}
             </button>
           </div>
         </form>

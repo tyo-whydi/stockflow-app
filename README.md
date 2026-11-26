@@ -22,7 +22,7 @@ This project uses [`next/font`](https://nextjs.org/docs/app/building-your-applic
 
 ## Multi-company setup
 
-StockFlow stores each company's catalog, stock, transactions, and members in a separate tenant. Existing WMS data is assigned to the initial **Perusahaan Utama** workspace by the migration. An administrator can rename it, create additional companies, and add existing StockFlow accounts with company-specific roles. Staff can record their own transactions, managers can view company reports and records, and admins manage company data and members; these permissions are enforced by row-level security.
+StockFlow stores each company's catalog, stock, transactions, and members in a separate tenant. Existing WMS data is assigned to the initial **Perusahaan Utama** workspace by the migration. An administrator can rename it, create additional companies, and manage members with company-specific roles. Admins can add existing StockFlow accounts or create a new invited account; new members receive an email link to activate their account and set a password. Staff can record their own transactions, managers can view company reports and records, and admins manage company data and members; these permissions are enforced by row-level security.
 
 Before deploying the multi-company application:
 
@@ -30,7 +30,14 @@ Before deploying the multi-company application:
 2. Schedule a short maintenance window: apply the migration and deploy the matching application build together. The old application cannot create transactions after the migration, and the new application requires the migrated schema.
 3. Verify sign-in, company switching, member roles, stock-in/out, and reports before reopening writes.
 
-The migration enables row-level security and backfills existing data. Foreign keys restrict deleting companies, categories, products, or locations while dependent WMS records or audit history exist, preserving stock and transaction history. Do not deploy the application before the migration succeeds. Adding a member currently requires that the person already has a StockFlow account; email invitations and billing/tenant limits are not included.
+The migration enables row-level security and backfills existing data. Foreign keys restrict deleting companies, categories, products, or locations while dependent WMS records or audit history exist, preserving stock and transaction history. Do not deploy the application before the migration succeeds. Billing and tenant limits are not included.
+
+For company admins to create invited accounts, configure these Vercel environment variables:
+
+- `SUPABASE_SERVICE_ROLE_KEY`: the server-only service role key from the Supabase project. Never expose it with a `NEXT_PUBLIC_` prefix or commit it to source control.
+- `NEXT_PUBLIC_SITE_URL`: the canonical application URL, for example `https://stockflow-app-ten.vercel.app`.
+
+Add `${NEXT_PUBLIC_SITE_URL}/dashboard/profile` to Supabase Authentication URL Configuration's allowed redirect URLs, and configure Supabase email delivery (preferably custom SMTP for production). The service role key is used only by the server API, which verifies the caller's company-admin role before creating or attaching an account.
 
 ## Learn More
 
